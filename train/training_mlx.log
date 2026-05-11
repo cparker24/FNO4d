@@ -1,0 +1,19 @@
+Epoch    0 | train_err=4.708714 | avg_loss=4.708714 | time=10.62s
+         eval: 100_h1=10.149270 | 100_l2=10.766573
+         Saved best model (metric=10.766573)
+Epoch    1 | train_err=4.498526 | avg_loss=4.498526 | time=10.78s
+Epoch    2 | train_err=4.780240 | avg_loss=4.780240 | time=10.35s
+         eval: 100_h1=8.116737 | 100_l2=8.170364
+         Saved best model (metric=8.170364)
+Epoch    3 | train_err=4.039563 | avg_loss=4.039563 | time=10.47s
+Epoch    4 | train_err=4.187434 | avg_loss=4.187434 | time=10.47s
+         eval: 100_h1=9.262902 | 100_l2=9.668721
+Epoch    5 | train_err=4.100828 | avg_loss=4.100828 | time=10.63s
+Epoch    6 | train_err=4.019395 | avg_loss=4.019395 | time=10.82s
+         eval: 100_h1=7.964819 | 100_l2=7.965317
+         Saved best model (metric=7.965317)
+Epoch    7 | train_err=3.966626 | avg_loss=3.966626 | time=11.01s
+Epoch    8 | train_err=3.931845 | avg_loss=3.931845 | time=10.82s
+         eval: 100_h1=7.903478 | 100_l2=7.830992
+         Saved best model (metric=7.830992)
+Epoch    9 | train_err=3.948805 | avg_loss=3.948805 | time=10.77s

@@ -1,0 +1,6 @@
+pyproject.toml
+neuralop_mlx.egg-info/PKG-INFO
+neuralop_mlx.egg-info/SOURCES.txt
+neuralop_mlx.egg-info/dependency_links.txt
+neuralop_mlx.egg-info/requires.txt
+neuralop_mlx.egg-info/top_level.txt

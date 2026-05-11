@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "neuralop_mlx"
+version = "0.1.0"
+description = "MLX port of Fourier Neural Operator (FNO)"
+requires-python = ">=3.10"
+dependencies = ["mlx>=0.16"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["neuralop_mlx*"]
