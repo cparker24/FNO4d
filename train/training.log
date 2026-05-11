@@ -1,6 +1,0 @@
-Training on 8 samples
-Testing on [2] samples         on resolutions [100].
-Raw outputs of shape torch.Size([1, 4, 64, 64, 32, 35])
-[0] time=79.33, avg_loss=3.9688, train_err=3.9688
-Eval: 100_h1=3.8952, 100_l2=3.9813
-[Rank 0]: saved training state to ./
