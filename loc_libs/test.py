@@ -1,4 +1,3 @@
-import read_3d_root
 import numpy as np
 import uproot  as up
 import read_3d_root
