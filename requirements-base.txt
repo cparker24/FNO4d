@@ -1,0 +1,40 @@
+# ── FNO4d base requirements ──────────────────────────────────────────────────
+# Shared across all platforms (Mac Silicon + Linux/Lambda).
+# torch / mlx are NOT listed here — handled per-platform in install.sh
+# or via requirements-mac.txt / requirements-linux.txt.
+
+# Data I/O — ROOT files and HDF5
+numpy>=1.25
+uproot
+awkward
+h5py
+zarr
+
+# Scientific computing
+opt-einsum
+tensorly
+tensorly-torch
+scikit-image
+
+# Visualisation & system monitoring
+matplotlib
+psutil
+
+# Config / experiment tracking
+wandb
+ruamel-yaml
+zencfg>=0.3.0
+configmypy
+
+# Notebook / app runner
+marimo
+# jupyter         # uncomment if not provided by container / base environment
+# jupyterlab      # uncomment if not provided by container / base environment
+
+# Cloud storage — AWS S3-compatible and Google Cloud Storage
+# uproot passes storage_options directly to fsspec, so these drivers
+# enable s3:// and gs:// paths in read_3d_root.py / read_3d_hdf5.py.
+s3fs              # fsspec driver for S3-compatible services (Lambda, MinIO, …)
+boto3             # direct AWS S3 Python API
+gcsfs             # fsspec driver for Google Cloud Storage
+google-cloud-storage  # direct GCS Python API

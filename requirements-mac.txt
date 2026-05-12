@@ -1,0 +1,19 @@
+# ── FNO4d Mac Silicon (arm64) requirements ───────────────────────────────────
+# Installs everything needed to run BOTH training paths:
+#   • neuralop  (PyTorch / MPS)   — train/test_train.py, test_train_hdf5.ipynb
+#   • neuralop_mlx (MLX / Metal)  — train/test_train_mlx.py, test_train_mlx.ipynb
+#
+# Even the MLX scripts use torch.utils.data.DataLoader, so torch is always
+# required regardless of which path you run.
+#
+# Usage (activate your env first, then from repo root):
+#   pip install -r requirements-mac.txt
+
+-r requirements-base.txt
+
+# PyTorch — MPS-capable wheel (standard PyPI, picks arm64 automatically)
+torch
+torchvision
+
+# MLX — Apple Metal GPU backend (Mac Silicon only)
+mlx>=0.16

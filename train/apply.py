@@ -39,7 +39,7 @@ def _():
     indir = f'.' # current run
     #model_input = f'{indir}/best_model_state_dict.pt'
     model_input = f'./best_model_state_dict.pt'
-    log_file = f'{indir}/log.txt'
+    log_file = f'{indir}/log.log'
     with open(log_file, 'r') as f:
         for line in f.readlines():
             #print(line)

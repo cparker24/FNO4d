@@ -31,7 +31,7 @@ hidden_channels = 16
 n_modes      = [32, 32, 16, 16]
 n_epochs     = 1
 
-log = open(f'{odir}/log_hdf5.txt', 'w')
+log = open(f'{odir}/log_hdf5.log', 'w')
 log.write(f'input dir: {input_dir}\n')
 log.write(f'input files: {input_files}\n')
 log.write(f'n_epochs: {n_epochs}\n')
