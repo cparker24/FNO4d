@@ -1,0 +1,7 @@
+Use best on Mac with docker/container:
+
+container run --rm --cpus 12 --memory 32g -it -v /Users/du8478/FNO/:/work -e DISPLAY=192.168.68.60:0 --name myRootDevContainer jhputschke/root-dev:latest-multiarch
+
+Initially generated on 12/22/2025, this is a copy of files from the directory
+/home/davidstewart/flat on the ``Lambda machine'' computer used for research
+J. Putschke's Wayne State group.
