@@ -164,11 +164,16 @@ if [[ "$PLATFORM" == "mac" ]]; then
     $PIP install -e "$REPO_ROOT"
 fi
 
-# ── nbstripout git hook ───────────────────────────────────────────────────────
-log "Installing nbstripout git filter ..."
+# ── nbstripout git hook (skipped if git is not available) ────────────────────
 $PIP install nbstripout --quiet
-python3 -m nbstripout --install --attributes "$REPO_ROOT/.gitattributes"
-log "nbstripout installed — notebook outputs will be stripped on commit."
+if command -v git &>/dev/null && git -C "$REPO_ROOT" rev-parse --git-dir &>/dev/null; then
+    log "Installing nbstripout git filter ..."
+    python3 -m nbstripout --install --attributes "$REPO_ROOT/.gitattributes"
+    log "nbstripout installed — notebook outputs will be stripped on commit."
+else
+    warn "git not found or not a git repo — skipping nbstripout filter registration."
+    log "nbstripout is installed; to enable later: python3 -m nbstripout --install"
+fi
 
 # ── summary ───────────────────────────────────────────────────────────────────
 echo ""
