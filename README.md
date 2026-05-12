@@ -101,6 +101,51 @@ Installs `torch` + `torchvision` (MPS-capable, standard PyPI), `mlx>=0.16`
 > **Note:** `mlx` and `neuralop_mlx` are **not** installed on Linux —
 > they are Apple Silicon only.
 
+#### What else `install.sh` sets up
+
+Beyond Python packages the script also configures two developer-experience tools:
+
+**nbstripout** — strips Jupyter notebook outputs before every `git commit`.
+Notebook outputs (cell results, tracebacks, memory stats) are never stored in
+git history, keeping diffs readable and the repo small.  The filter is
+registered in the local `.git/config` and the `.gitattributes` file (committed
+to the repo) tells git which files to filter.
+
+```bash
+# strip + refresh all notebooks manually (only needed once after install,
+# or if you add a new notebook that already has outputs):
+git add --renormalize '*.ipynb'
+git commit -m "strip notebook outputs"
+```
+
+**VS Code — Run on Save** (`emeraldwalk.runonsave`) — automatically runs
+`git add <notebook>` every time you save a `.ipynb` file in VS Code.  This
+keeps git's stat cache in sync with the nbstripout filter so notebooks never
+show as "modified" in the Source Control panel after running cells.
+
+The extension is listed in `.vscode/extensions.json` so VS Code will prompt
+you to install it when you open the repo.  To install it manually:
+
+```
+Extensions panel → search "Run on Save" (emeraldwalk.runonsave) → Install
+```
+
+> **JupyterLab users:** the Run on Save extension only works inside VS Code.
+> In JupyterLab the same effect can be achieved by adding a post-save hook to
+> `~/.jupyter/jupyter_server_config.py`:
+>
+> ```python
+> import subprocess, os
+> def _strip_on_save(model, os_path, contents_manager, **kwargs):
+>     if model.get("type") == "notebook":
+>         subprocess.run(["git", "add", os_path],
+>                        cwd=os.path.dirname(os_path) or ".",
+>                        capture_output=True, timeout=10)
+> c.FileContentsManager.post_save_hook = _strip_on_save
+> ```
+
+---
+
 ### Manual install (without the script)
 
 ```bash
