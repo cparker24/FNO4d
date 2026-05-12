@@ -1,4 +1,5 @@
 import os
+import tracemalloc
 import uproot  as up
 import awkward as ak
 import numpy as np
@@ -35,8 +36,11 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None, stora
         'ntau' : file['ntau'].member('fVal'), # if variable length, then is 0
     }
 
-    dat['tau_freezeout'] = np.array(ak.to_numpy(file['t']['tau_freezeout'].array(library='ak')))
-    dat['ntau_freezeout'] = np.array(ak.to_numpy(file['t']['ntau_freezeout'].array(library='ak')))
+    current, peak = tracemalloc.get_traced_memory()
+    print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+    
+    dat['tau_freezeout'] = ak.to_numpy(file['t']['tau_freezeout'].array(library='ak'))
+    dat['ntau_freezeout'] = ak.to_numpy(file['t']['ntau_freezeout'].array(library='ak'))
 
     print('Grid parameters:')
     print(f"  nx: {dat['nx']}, ny: {dat['ny']}, neta: {dat['neta']}, ntau: {dat['ntau']}")
@@ -51,7 +55,6 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None, stora
     else:
         start_event = 0
         end_event = nevents 
-
 
 
     if 'flat_data' in file['t'].keys():
@@ -97,6 +100,7 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None, stora
                 print(f'... and {len(nan_locs) - 100} more')
             # raise ValueError(f"{num_nan} NaN entries found in data array")
         dat['nans'] = np.argwhere(np.isnan(arr)) if num_nan else None
+        
         print('Read array of shape:', arr.shape)
         return dat
     else:
@@ -104,32 +108,76 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None, stora
         branch = file['t']['user_res']
         if not choose_ntau:
             choose_ntau = np.max(dat['ntau_freezeout'])
-            # choose_ntau = np.max(ak.to_numpy(branch.array(library='ak')))
+            #choose_ntau = int(np.percentile(dat['ntau_freezeout'], 99)) #better if outlier events are not necessay!? Unclear!?
+        
         nentries = branch.num_entries
 
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+        
         if nevents <= 0:
             nevents = nentries
         elif nevents > nentries:
             print(f'Requested more events ({nevents}) than available({nentries}); so using max available ({nentries})')
-            nentries = nevents
+            nevents = nentries
 
         target_len = int(dat['nx']*dat['ny']*dat['neta']*dat['nFeatures']*choose_ntau)
-        arr_ak = branch.array(entry_stop=nevents)
-        nevents = len(arr_ak)
-        print(f'There were {nevents} events')#, with {np.sum(ak.nan(arr_ak))}')
-        arr_ak_padded = ak.pad_none(arr_ak, target_len, axis=-1, clip=True)
-        arr_ak_padded = ak.fill_none(arr_ak_padded, 0.)
-        arr_ak_padded = ak.to_numpy(arr_ak_padded).astype(np.float32)
-        arr = arr_ak_padded.reshape(nevents, choose_ntau, dat['nx'], dat['ny'], dat['neta'], dat['nFeatures'])
-        arr = np.reshape(arr, (nevents, choose_ntau,dat['nx'], dat['ny'], dat['neta'], dat['nFeatures']))
+        print(f'There were {nevents} events')
+
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+        print(f"Processing {nevents} events with variable-length tau dimension; padding to {choose_ntau} taus per event (total size per event: {target_len} entries)")
+        
+        # Allocate the full output array once, up front
+        arr = np.zeros(
+            (nevents, choose_ntau, dat['nx'], dat['ny'], dat['neta'], dat['nFeatures']), dtype=np.float32
+        )
+
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+            
+        # Process in chunks to bound peak memory
+        chunk_size = nevents // 10 if nevents >= 10 else 1
+        for start in range(0, nevents, chunk_size):
+            print(f"Processing events {start} to {min(start + chunk_size, nevents)}...")
+            stop = min(start + chunk_size, nevents)
+            
+            current, peak = tracemalloc.get_traced_memory()
+            print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+            
+            arr_ak = branch.array(entry_start=start, entry_stop=stop)
+            padded = ak.to_numpy(
+                ak.fill_none(ak.pad_none(arr_ak, target_len, axis=-1, clip=True),
+                            np.float32(0.))
+            ).astype(np.float32, copy=False)
+            
+            current, peak = tracemalloc.get_traced_memory()
+            print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+            # write directly into the pre-allocated slice — no accumulation
+            arr[start:stop] = padded.reshape(
+                stop - start, choose_ntau, dat['nx'], dat['ny'], dat['neta'], dat['nFeatures']
+            )
+            current, peak = tracemalloc.get_traced_memory()
+            print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+            
+            del arr_ak, padded   # intermediate freed immediately
+        
+        current, peak = tracemalloc.get_traced_memory()
+        
         print('Before moveaxis - Read array of shape:', arr.shape)
+        
         arr = np.moveaxis(arr, 1, -1)
         arr = np.moveaxis(arr, -2, 1)
         dat['arr'] = arr
+        
+        current, peak = tracemalloc.get_traced_memory()
+        print(f"[Memory tracemalloc] All done with padding Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+        
         num_nan = np.sum(np.isnan(arr))
         if num_nan:
             print(f'   Warning: there are {num_nan} NaN entries in the data array')
-            raise ValueError(f"{num_nan} NaN entries found in data array")
+            raise ValueError(f"{num_nan} NaN entries found in data array") 
+        
         print('Read array of shape:', arr.shape)
         return dat
 
