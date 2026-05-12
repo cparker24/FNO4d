@@ -1,0 +1,10 @@
+{
+    "emeraldwalk.runonsave": {
+        "commands": [
+            {
+                "match": "\\.ipynb$",
+                "cmd": "git add ${file}"
+            }
+        ]
+    }
+}
