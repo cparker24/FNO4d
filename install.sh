@@ -39,11 +39,16 @@ fi
 USING_CONDA=false
 VENV_CREATED=false
 
-if [[ -n "${CONDA_PREFIX:-}" ]]; then
-    log "Active conda environment detected: $CONDA_PREFIX"
+if [[ -n "${CONDA_PREFIX:-}" && "${CONDA_DEFAULT_ENV:-}" != "base" ]]; then
+    log "Active conda environment detected: $CONDA_PREFIX  (env: $CONDA_DEFAULT_ENV)"
     log "Installing into current conda env — no virtualenv will be created."
     USING_CONDA=true
-    PIP="pip"
+    PIP="python -m pip"
+elif [[ "${CONDA_DEFAULT_ENV:-}" == "base" ]]; then
+    warn "conda 'base' environment is active — refusing to install into base."
+    warn "Please activate a named conda env (conda activate <name>) or deactivate conda."
+    warn "Falling back to virtualenv instead."
+    # fall through to venv creation below
 else
     VENV_DIR="$REPO_ROOT/venv"
     if [[ -d "$VENV_DIR" ]]; then
@@ -59,7 +64,7 @@ else
     fi
     # shellcheck disable=SC1091
     source "$VENV_DIR/bin/activate"
-    PIP="$VENV_DIR/bin/pip"
+    PIP="python -m pip"
     log "Virtualenv activated: $VENV_DIR"
 fi
 
