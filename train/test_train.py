@@ -22,7 +22,7 @@ batch_size=1
 hidden_channels = 16
 n_modes = [32,32,16,16] # 
 
-nevents_in = 10 #-1 #100#-1
+nevents_in = -1 #100#-1
 log_directly = True
 checkpoint_freq = None
 train_ratio = 0.8
@@ -117,7 +117,7 @@ import gc
 from  torch.utils.data import DataLoader, random_split, Dataset
 
 import sys
-sys.path.append('/Users/du8478//FNO/Dave/loc_libs')
+sys.path.append('../loc_libs')
 from read_3d_root import read_3d_data, coarsen_array
 from parse_training_log import plot_training_log
 

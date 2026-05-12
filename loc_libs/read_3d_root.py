@@ -3,6 +3,7 @@ import tracemalloc
 import uproot  as up
 import awkward as ak
 import numpy as np
+import tracemalloc
 
 def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None, storage_options=None):
     ''' read events from a 3d root file
@@ -12,6 +13,9 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None, stora
         # several parameters
         x_min, y_min, eta_min, dx, dy, deta, dtau : grid parameters}
     '''
+    
+    tracemalloc.start()
+    
     _is_remote = isinstance(file_path, str) and file_path.startswith(("s3://", "gs://", "http://", "https://"))
     if not _is_remote and not os.path.exists(file_path):
         raise FileNotFoundError(f"File {file_path} does not exist.")
@@ -102,6 +106,7 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None, stora
         dat['nans'] = np.argwhere(np.isnan(arr)) if num_nan else None
         
         print('Read array of shape:', arr.shape)
+        tracemalloc.stop()
         return dat
     else:
         ''' must be reading straight from .root, presumable with variable length tau dimension'''
@@ -179,6 +184,7 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None, stora
             raise ValueError(f"{num_nan} NaN entries found in data array") 
         
         print('Read array of shape:', arr.shape)
+        tracemalloc.stop()
         return dat
 
 def coarsen_array(arr, i_axis, factor):

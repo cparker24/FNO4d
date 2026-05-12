@@ -61,7 +61,7 @@ from time import perf_counter
 t0 = perf_counter()
 
 import sys
-sys.path.append('/Users/du8478//FNO/Dave/loc_libs')
+sys.path.append('../loc_libs')
 from read_3d_root import read_3d_data, coarsen_array
 from parse_training_log import plot_training_log
 

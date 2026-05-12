@@ -70,7 +70,7 @@ def print_tracemalloc(label=""):
 
 t0 = perf_counter()
 
-sys.path.append('/Users/du8478/FNO/Dave/loc_libs')
+sys.path.append('../loc_libs')
 from read_3d_hdf5 import convert_root_to_hdf5, read_3d_data_hdf5
 
 # ---------------------------------------------------------------------------
