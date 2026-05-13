@@ -34,7 +34,18 @@ configmypy
 # Cloud storage — AWS S3-compatible and Google Cloud Storage
 # uproot passes storage_options directly to fsspec, so these drivers
 # enable s3:// and gs:// paths in read_3d_root.py / read_3d_hdf5.py.
-s3fs              # fsspec driver for S3-compatible services (Lambda, MinIO, …)
-boto3             # direct AWS S3 Python API
-gcsfs             # fsspec driver for Google Cloud Storage
-google-cloud-storage  # direct GCS Python API
+#
+# fsspec is pinned to <2025.0 to avoid conflicts with packages commonly found
+# in ML conda envs (datasets<=2023.10.0 and lightning<2.3 both cap fsspec).
+# s3fs and gcsfs version bands are chosen to be compatible with that fsspec range.
+fsspec>=2023.1.0,<2025.0   # pin before s3fs/gcsfs can upgrade it
+s3fs<2025.0                # fsspec driver for S3-compatible services (Lambda, MinIO, …)
+boto3                      # direct AWS S3 Python API
+gcsfs<2025.0               # fsspec driver for Google Cloud Storage
+google-cloud-storage       # direct GCS Python API
+
+# If issues let free float again ... (as before)
+#3fs              # fsspec driver for S3-compatible services (Lambda, MinIO, …)
+#boto3             # direct AWS S3 Python API
+#gcsfs             # fsspec driver for Google Cloud Storage
+#google-cloud-storage  # direct GCS Python API
