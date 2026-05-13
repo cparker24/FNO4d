@@ -17,7 +17,8 @@ Two parallel training stacks are provided:
 
 ```
 FNO4d/
-├── install.sh                   # one-shot install script (see below)
+├── install.sh                   # install into current env (inherits system packages)
+├── install_full.sh              # create a fresh isolated env (conda or virtualenv)
 ├── requirements-base.txt        # shared deps (both platforms)
 ├── requirements-mac.txt         # Mac Silicon: adds torch + mlx
 ├── requirements-linux.txt       # Linux/Lambda: adds nothing (torch auto-detected)
@@ -86,6 +87,56 @@ Flags compose freely, e.g. `bash install.sh --conda --s3 --gcs`.
 > **conda base:** the `base` env is never modified directly. With `bash install.sh`
 > a venv is created that inherits base's packages via `--system-site-packages`.
 > With `--conda`, base is explicitly rejected — activate a named env first.
+
+---
+
+### Fresh isolated environment (`install_full.sh`)
+
+Use `install_full.sh` when you want a completely self-contained environment with
+**no** packages inherited from the system or a parent conda env.  It creates the
+environment from scratch, then installs all dependencies inside it.
+
+```bash
+# virtualenv (default) — stored inside the repo as venv_fno4d/
+bash install_full.sh
+bash install_full.sh --name .venv           # custom path/name
+bash install_full.sh --name .venv --s3      # + S3 storage
+bash install_full.sh --name .venv --gcs     # + Google Cloud Storage
+
+# conda — creates a new named conda env
+bash install_full.sh --conda                        # default name: fno4d
+bash install_full.sh --conda --name fno4d_cu124     # custom name
+bash install_full.sh --conda --name fno4d_s3 --s3   # + S3
+bash install_full.sh --conda --name fno4d_all --s3 --gcs  # + both cloud
+```
+
+Flags may be freely combined.  Run `bash install_full.sh --help` for details.
+
+#### Environment options
+
+| Flag | Behaviour |
+|---|---|
+| *(none)* | Creates `venv_fno4d/` in the repo root — a plain virtualenv with no inherited packages. |
+| `--venv` | Same as above; explicit form of the default. |
+| `--conda` | Creates a new named conda env (`python=3.11`) via `conda create`. |
+| `--name NAME` | Override the environment name/path (`venv_fno4d` or `fno4d` by default). |
+| `--s3` | Also installs `requirements-s3.txt`: `s3fs` + `boto3`. |
+| `--gcs` | Also installs `requirements-gcs.txt`: `gcsfs` + `google-cloud-storage`. |
+
+> The environment must not already exist — the script exits with an error if it
+> does, so accidental overwrites are impossible.
+
+#### Activate after install
+
+```bash
+# virtualenv
+source venv_fno4d/bin/activate   # or whatever name you chose
+
+# conda
+conda activate fno4d             # or whatever name you chose
+```
+
+---
 
 #### Mac Silicon (arm64)
 
@@ -235,7 +286,8 @@ data = read_3d_data(
 
 The packages `s3fs`, `boto3`, `gcsfs`, and `google-cloud-storage` are
 installed only when the corresponding `--s3` / `--gcs` flag is passed to
-`install.sh` (or the matching requirements file is installed manually).
+`install.sh` or `install_full.sh` (or the matching requirements file is
+installed manually).
 
 ---
 
