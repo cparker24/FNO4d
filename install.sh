@@ -156,14 +156,40 @@ install_torch_linux() {
 }
 
 # ── snapshot installed packages as constraints ───────────────────────────────
-# Capture every package already visible in this environment (system/conda packages
-# inherited via --system-site-packages) as a pip constraints file.  Passing -c to
-# the installs below prevents pip from upgrading packages that are already present,
-# which avoids conflicts like s3fs dragging fsspec past the ceiling required by
-# datasets or lightning that are pre-installed in the base environment.
+# Freeze the current environment into a constraints file so pip cannot silently
+# upgrade packages that are already present (e.g. fsspec in a conda env).
+# Packages we explicitly list in our requirements files are excluded from the
+# constraints so that our own pins always win over whatever the env has.
 _ENV_CONSTRAINTS=$(mktemp /tmp/fno4d_constraints.XXXXXX)
-$PIP freeze | grep -v '^-e ' | grep -v ' @ file://' > "$_ENV_CONSTRAINTS"
-log "Captured $( wc -l < "$_ENV_CONSTRAINTS" | tr -d ' ' ) package constraints from current environment."
+$PIP freeze \
+  | grep -v '^-e ' \
+  | grep -v ' @ file://' \
+  | python3 -c "
+import sys, re, os
+repo = os.environ.get('REPO_ROOT', '.')
+our_pkgs = set()
+for rf in ['requirements-base.txt', 'requirements-mac.txt', 'requirements-linux.txt']:
+    try:
+        for line in open(os.path.join(repo, rf)):
+            line = line.strip()
+            if line and not line.startswith('#') and not line.startswith('-'):
+                name = re.split(r'[>=<! \[\@;]', line)[0].lower().replace('-','_')
+                our_pkgs.add(name)
+    except FileNotFoundError:
+        pass
+for line in sys.stdin:
+    name = re.split(r'[>=<! \[\@;=]', line.strip())[0].lower().replace('-','_')
+    if name not in our_pkgs:
+        sys.stdout.write(line)
+" > "$_ENV_CONSTRAINTS"
+log "Captured $( wc -l < "$_ENV_CONSTRAINTS" | tr -d ' ' ) package constraints from current environment (excluding packages we manage)."
+
+# In a fresh env botocore is not yet locked, so install s3fs first — that pins
+# aiobotocore+botocore, then boto3 resolves without backtracking.
+if ! $PIP show botocore &>/dev/null 2>&1; then
+    log "botocore not found in env — pre-installing s3fs to lock botocore before boto3 ..."
+    $PIP install s3fs
+fi
 
 # ── main install ──────────────────────────────────────────────────────────────
 if [[ "$PLATFORM" == "mac" ]]; then

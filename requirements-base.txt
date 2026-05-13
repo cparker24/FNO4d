@@ -35,24 +35,15 @@ configmypy
 # uproot passes storage_options directly to fsspec, so these drivers
 # enable s3:// and gs:// paths in read_3d_root.py / read_3d_hdf5.py.
 #
-# fsspec is pinned to ==2023.10.0 — the strict ceiling imposed by datasets 2.17.1
-# (requires fsspec<=2023.10.0) and consistent with s3fs/gcsfs 2023.10.0 which both
-# require fsspec==2023.10.0 exactly.
-#
-# The botocore triangle for s3fs==2023.10.0 / aiobotocore==2.7.0:
-#   aiobotocore==2.7.0  →  botocore>=1.31.16,<1.31.65
-#   botocore==1.31.64   ←  max allowed by aiobotocore (one below the ceiling)
-#   boto3==1.28.64      →  botocore>=1.31.64,<1.31.65  ✓ (closed triangle, no backtracking)
-fsspec==2023.10.0          # ceiling set by datasets 2.17.1; required exactly by s3fs/gcsfs below
-s3fs==2023.10.0            # fsspec driver for S3-compatible services (Lambda, MinIO, …)
-gcsfs==2023.10.0           # fsspec driver for Google Cloud Storage
-google-cloud-storage       # direct GCS Python API
-aiobotocore==2.7.0         # s3fs==2023.10.0 requires aiobotocore~=2.7.0
-botocore==1.31.64          # max botocore allowed by aiobotocore==2.7.0 (<1.31.65)
-boto3==1.28.64             # boto3 1.28.64 requires botocore>=1.31.64,<1.31.65 — exact match
-
-# If issues let free float again ... (as before)
-#3fs              # fsspec driver for S3-compatible services (Lambda, MinIO, …)
+# No version pins here — install.sh freezes the current environment as a pip
+# constraints file before running pip install, so whatever fsspec/botocore version
+# is already present (e.g. in a conda base env) is respected automatically.
+# boto3 backtracking is avoided because botocore is already locked in the env;
+# in a fresh environment install.sh installs s3fs first to lock botocore before boto3.
+s3fs                 # fsspec driver for S3-compatible services (Lambda, MinIO, …)
+gcsfs                # fsspec driver for Google Cloud Storage
+google-cloud-storage # direct GCS Python API
+boto3                # direct AWS API (botocore version constrained by s3fs→aiobotocore)
 #boto3             # direct AWS S3 Python API
 #gcsfs             # fsspec driver for Google Cloud Storage
 #google-cloud-storage  # direct GCS Python API
