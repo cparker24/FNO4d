@@ -155,15 +155,25 @@ install_torch_linux() {
     $PIP install torch-harmonics
 }
 
+# ── snapshot installed packages as constraints ───────────────────────────────
+# Capture every package already visible in this environment (system/conda packages
+# inherited via --system-site-packages) as a pip constraints file.  Passing -c to
+# the installs below prevents pip from upgrading packages that are already present,
+# which avoids conflicts like s3fs dragging fsspec past the ceiling required by
+# datasets or lightning that are pre-installed in the base environment.
+_ENV_CONSTRAINTS=$(mktemp /tmp/fno4d_constraints.XXXXXX.txt)
+$PIP freeze > "$_ENV_CONSTRAINTS"
+log "Captured $( wc -l < "$_ENV_CONSTRAINTS" | tr -d ' ' ) package constraints from current environment."
+
 # ── main install ──────────────────────────────────────────────────────────────
 if [[ "$PLATFORM" == "mac" ]]; then
     log "Installing Mac Silicon requirements (torch + mlx + base) ..."
-    $PIP install -r "$REPO_ROOT/requirements-mac.txt"
+    $PIP install -r "$REPO_ROOT/requirements-mac.txt" -c "$_ENV_CONSTRAINTS"
 
 elif [[ "$PLATFORM" == "linux" ]]; then
     install_torch_linux
     log "Installing Linux base requirements ..."
-    $PIP install -r "$REPO_ROOT/requirements-linux.txt"
+    $PIP install -r "$REPO_ROOT/requirements-linux.txt" -c "$_ENV_CONSTRAINTS"
 fi
 
 # ── local editable installs (both platforms) ──────────────────────────────────
@@ -231,3 +241,6 @@ if not ok:
     print()
     print('To debug: run pip list and check which neuraloperator / loc-libs entry appears first.')
 "
+
+# clean up temporary constraints file
+rm -f "$_ENV_CONSTRAINTS"
