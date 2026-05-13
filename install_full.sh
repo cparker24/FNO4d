@@ -289,6 +289,7 @@ install_torch_linux() {
     fi
 
     local _TORCH_SPEC="torch"
+    local _USE_PYPI=false   # if true, install without --index-url (PyPI fallback)
     if [[ -n "$TORCH_VERSION" ]]; then
         # PyTorch 2.6+ wheels on the custom index carry a local version suffix
         # (+cpu, +cu124, …).  Pip's == operator does not match across local
@@ -296,30 +297,51 @@ install_torch_linux() {
         # Probe with --dry-run (fast, no download) to pick the right form.
         local _SPEC_TAGGED="torch==${TORCH_VERSION}+${WHEEL_TAG}"
         local _SPEC_PLAIN="torch==${TORCH_VERSION}"
+        local _found=false
         log "Resolving torch==${TORCH_VERSION} on $INDEX_URL ..."
         if $PIP install --dry-run --quiet "${_SPEC_TAGGED}" \
                 --index-url "$INDEX_URL" &>/dev/null; then
-            _TORCH_SPEC="$_SPEC_TAGGED"
-            log "  → using ${_SPEC_TAGGED}"
+            _TORCH_SPEC="$_SPEC_TAGGED"; _found=true
+            log "  → using ${_SPEC_TAGGED} (custom index)"
         elif $PIP install --dry-run --quiet "${_SPEC_PLAIN}" \
                 --index-url "$INDEX_URL" &>/dev/null; then
-            _TORCH_SPEC="$_SPEC_PLAIN"
-            log "  → using ${_SPEC_PLAIN}"
-        else
-            # Neither form found — show available versions and abort.
+            _TORCH_SPEC="$_SPEC_PLAIN"; _found=true
+            log "  → using ${_SPEC_PLAIN} (custom index)"
+        elif [[ "$WHEEL_TAG" == "cpu" ]]; then
+            # CPU-only: the custom index may lag PyPI — try PyPI as well.
+            log "  Not found on custom index — checking PyPI ..."
+            if $PIP install --dry-run --quiet "${_SPEC_PLAIN}" &>/dev/null; then
+                _TORCH_SPEC="$_SPEC_PLAIN"; _found=true; _USE_PYPI=true
+                log "  → using ${_SPEC_PLAIN} (PyPI)"
+            fi
+        fi
+
+        if [[ "$_found" == false ]]; then
             echo >&2 ""
-            warn "torch==${TORCH_VERSION} not found on $INDEX_URL"
-            warn "Available versions (pass one of these to --torch):"
+            warn "torch==${TORCH_VERSION} not found."
+            warn "Available versions on custom CPU index (pass one to --torch):"
             $PIP index versions torch --index-url "$INDEX_URL" 2>&1 \
                 | grep -i "Available versions" \
                 | sed 's/+[a-zA-Z0-9]*//g' \
                 | tr ',' '\n' \
                 | sed 's/[[:space:]]//g; /^$/d; s/Availableversions://g' >&2 || true
-            die "Choose a valid version from the list above and re-run with --torch <version>."
+            if [[ "$WHEEL_TAG" == "cpu" ]]; then
+                warn "Also available on PyPI:"
+                $PIP index versions torch 2>&1 \
+                    | grep -i "Available versions" \
+                    | sed 's/+[a-zA-Z0-9]*//g' \
+                    | tr ',' '\n' \
+                    | sed 's/[[:space:]]//g; /^$/d; s/Availableversions://g' >&2 || true
+            fi
+            die "Choose a valid version from the lists above and re-run with --torch <version>."
         fi
     fi
-    log "Installing ${_TORCH_SPEC} + torchvision from $INDEX_URL ..."
-    $PIP install "${_TORCH_SPEC}" torchvision --index-url "$INDEX_URL"
+    log "Installing ${_TORCH_SPEC} + torchvision ..."
+    if [[ "$_USE_PYPI" == true ]]; then
+        $PIP install "${_TORCH_SPEC}" torchvision
+    else
+        $PIP install "${_TORCH_SPEC}" torchvision --index-url "$INDEX_URL"
+    fi
 
     log "Installing torch-harmonics ..."
     $PIP install torch-harmonics
