@@ -156,7 +156,7 @@ install_torch_linux() {
         fi
     elif [[ "$CUDA_MAJOR" -ge 13 ]]; then
         # Try the exact cu<MAJOR><MINOR_PADDED> tag first; fall back to cu128
-        CANDIDATE="cu${CUDA_MAJOR}$(printf '%02d' "$CUDA_MINOR")"
+        CANDIDATE="cu${CUDA_MAJOR}${CUDA_MINOR}"
         INDEX_URL="https://download.pytorch.org/whl/${CANDIDATE}"
         log "CUDA $CUDA_MAJOR.$CUDA_MINOR — trying wheel tag $CANDIDATE ..."
         # Probe: check if any torch wheel exists under this tag
