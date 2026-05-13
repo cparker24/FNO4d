@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # install.sh — FNO4d environment setup
 #
-# Detects platform (Mac arm64 / Linux x86_64 / Linux aarch64) and environment
-# mode (active conda env vs fresh virtualenv), then installs all required
-# packages and local editable packages.
+# Detects platform (Mac arm64 / Linux x86_64 / Linux aarch64) and creates a
+# virtualenv with --system-site-packages so that packages already present in
+# the system Python, a conda env, or a Docker image are visible without
+# reinstalling them.
 #
 # Usage:
-#   bash install.sh            # from the repo root
+#   bash install.sh            # always creates/reuses venv/ (default)
+#   bash install.sh --conda    # install directly into the active non-base
+#                              # conda env instead of creating a venv
 #
-# In an active conda env the script installs directly into it (no venv created).
-# Otherwise a virtualenv named "venv" is created in the repo root.
+# The --conda flag is useful when you want packages registered in the conda
+# env itself (e.g. for conda-managed torch builds). It is refused if the
+# active env is 'base'.
 
 set -euo pipefail
 
@@ -20,6 +24,15 @@ die()  { echo "[install.sh] ERROR: $*" >&2; exit 1; }
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
+
+# ── parse flags ───────────────────────────────────────────────────────────────
+USE_CONDA_FLAG=false
+for arg in "$@"; do
+    case "$arg" in
+        --conda) USE_CONDA_FLAG=true ;;
+        *) die "Unknown argument: $arg  (usage: bash install.sh [--conda])" ;;
+    esac
+done
 
 # ── detect platform ───────────────────────────────────────────────────────────
 OS="$(uname -s)"    # Darwin | Linux
@@ -35,32 +48,33 @@ else
     die "Unsupported platform: OS=$OS ARCH=$ARCH"
 fi
 
-# ── detect / set up environment ───────────────────────────────────────────────
+# ── set up environment ────────────────────────────────────────────────────────
 USING_CONDA=false
-VENV_CREATED=false
 
-if [[ -n "${CONDA_PREFIX:-}" && "${CONDA_DEFAULT_ENV:-}" != "base" ]]; then
-    log "Active conda environment detected: $CONDA_PREFIX  (env: $CONDA_DEFAULT_ENV)"
-    log "Installing into current conda env — no virtualenv will be created."
+if [[ "$USE_CONDA_FLAG" == true ]]; then
+    # --conda: install into active named conda env (no venv)
+    if [[ -z "${CONDA_PREFIX:-}" ]]; then
+        die "--conda specified but no conda environment is active. Run 'conda activate <name>' first."
+    fi
+    if [[ "${CONDA_DEFAULT_ENV:-}" == "base" ]]; then
+        die "--conda specified but the active env is 'base'. Activate a named env first."
+    fi
+    log "Using conda env: $CONDA_PREFIX  (env: ${CONDA_DEFAULT_ENV:-unknown})"
     USING_CONDA=true
     PIP="python -m pip"
-elif [[ "${CONDA_DEFAULT_ENV:-}" == "base" ]]; then
-    warn "conda 'base' environment is active — refusing to install into base."
-    warn "Please activate a named conda env (conda activate <name>) or deactivate conda."
-    warn "Falling back to virtualenv instead."
-    # fall through to venv creation below
 else
+    # Default: always create/reuse a virtualenv with --system-site-packages.
+    # This works whether conda is active or not — the venv inherits whatever
+    # is installed in the parent Python (conda env, system, Docker image).
+    if [[ -n "${CONDA_PREFIX:-}" ]]; then
+        log "conda env '${CONDA_DEFAULT_ENV:-}' is active — venv will inherit its packages via --system-site-packages."
+    fi
     VENV_DIR="$REPO_ROOT/venv"
     if [[ -d "$VENV_DIR" ]]; then
         log "Existing virtualenv found at $VENV_DIR — reusing it."
     else
-        log "Creating virtualenv at $VENV_DIR ..."
-        if [[ "$PLATFORM" == "linux" ]]; then
-            python3 -m venv "$VENV_DIR" --system-site-packages
-        else
-            python3 -m venv "$VENV_DIR"
-        fi
-        VENV_CREATED=true
+        log "Creating virtualenv at $VENV_DIR (--system-site-packages) ..."
+        python3 -m venv "$VENV_DIR" --system-site-packages
     fi
     # shellcheck disable=SC1091
     source "$VENV_DIR/bin/activate"
@@ -179,10 +193,10 @@ fi
 echo ""
 log "Done."
 if [[ "$USING_CONDA" == true ]]; then
-    log "Active conda env: $CONDA_PREFIX"
-    log "All packages installed into the current conda environment."
+    log "Installed into conda env: $CONDA_PREFIX  (${CONDA_DEFAULT_ENV:-})"
+    log "No activation needed — already in the target env."
 else
-    log "Virtualenv: $REPO_ROOT/venv"
+    log "Virtualenv: $REPO_ROOT/venv  (--system-site-packages)"
     log "To activate: source $REPO_ROOT/venv/bin/activate"
 fi
 echo ""

@@ -55,7 +55,7 @@ FNO4d/
 
 ### Prerequisites
 
-- Python ≥ 3.10
+- Python ≥ 3.9
 - **Mac:** Xcode command-line tools (`xcode-select --install`)
 - **Linux/Lambda:** NVIDIA driver + `nvidia-smi` in `PATH` (for CUDA detection)
 - `git clone` this repo and `cd` into it
@@ -63,16 +63,20 @@ FNO4d/
 ### One-shot install
 
 ```bash
-bash install.sh
+bash install.sh           # default: always creates/reuses venv/
+bash install.sh --conda   # opt-in: install into active named conda env
 ```
 
-The script auto-detects your platform and environment:
+#### Environment modes
 
-| Condition | Behaviour |
+| Command | Behaviour |
 |---|---|
-| `$CONDA_PREFIX` is set | Installs into the **active conda env** — no venv created |
-| No conda env active | Creates `venv/` in the repo root, activates it |
-| Linux venv | Created with `--system-site-packages` to inherit container torch |
+| `bash install.sh` | Creates (or reuses) `venv/` in the repo root with `--system-site-packages`. Works in a bare shell, inside a conda env, or in a Docker container — packages already installed in the parent Python are visible without reinstalling. |
+| `bash install.sh --conda` | Installs directly into the **currently active named conda env** (no venv created). Refused if the active env is `base` or no conda env is active. |
+
+> **conda base:** the `base` env is never modified directly. With `bash install.sh`
+> a venv is created that inherits base's packages via `--system-site-packages`.
+> With `--conda`, base is explicitly rejected — activate a named env first.
 
 #### Mac Silicon (arm64)
 
@@ -82,7 +86,8 @@ Installs `torch` + `torchvision` (MPS-capable, standard PyPI), `mlx>=0.16`
 
 #### Linux / Lambda (x86\_64 or aarch64)
 
-1. Checks if `torch` is already importable (Docker image / conda / system site).
+1. Checks if `torch` is already importable (Docker image / conda / system site
+   inherited via `--system-site-packages`).
 2. If not found, detects CUDA version via `nvidia-smi` and installs the
    matching PyTorch wheel:
 
@@ -240,7 +245,7 @@ python test_train.py
 # or open test_train.ipynb / test_train_hdf5.ipynb in Jupyter
 ```
 
-Output: `log.txt`, `best_model_state_dict.pt`
+Output: `log.log`, `best_model_state_dict.pt`
 
 For large datasets, the HDF5-backed pipeline avoids loading all events into
 memory at once:
@@ -263,7 +268,7 @@ python test_train_mlx.py
 # or open test_train_mlx.ipynb in Jupyter
 ```
 
-Output: `log_mlx.txt`, `best_model.safetensors`
+Output: `log_mlx.log`, `best_model.safetensors`
 
 ### Inference / apply
 
