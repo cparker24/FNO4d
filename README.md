@@ -213,6 +213,49 @@ Extensions panel → search "Run on Save" (emeraldwalk.runonsave) → Install
 > c.FileContentsManager.post_save_hook = _strip_on_save
 > ```
 
+#### Enabling nbstripout without running `install.sh`
+
+The `.gitattributes` rule (`*.ipynb filter=nbstripout`) is already committed to
+the repo and clones correctly, but the **filter driver** (the command git
+actually calls) must be registered once per clone in `.git/config`.  The
+install script does this automatically; if you skip the script, do it manually:
+
+**1. Install the package** (skip if already installed)
+
+```bash
+pip install nbstripout        # inside your active conda env / virtualenv
+# or
+conda install -c conda-forge nbstripout
+```
+
+**2. Register the filter driver for this clone**
+
+```bash
+cd /path/to/FNO4d
+nbstripout --install
+```
+
+This writes the driver into `.git/config` — do **not** pass `--attributes`,
+because `.gitattributes` already has the correct entries tracked in the repo.
+
+**3. Verify**
+
+```bash
+nbstripout --status
+# → nbstripout is installed in repository '...'
+```
+
+**Optional — install globally** so the driver is active for every repo on your
+machine and you never need to repeat step 2 after a clone:
+
+```bash
+nbstripout --install --global
+```
+
+> **Conda users:** make sure the env that contains `nbstripout` is active
+> before running `nbstripout --install`, or use the full path, e.g.
+> `/opt/homebrew/Caskroom/miniconda/base/bin/nbstripout --install`.
+
 ---
 
 ### Manual install (without the script)

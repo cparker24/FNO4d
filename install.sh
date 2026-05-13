@@ -275,14 +275,16 @@ if [[ "$PLATFORM" == "mac" ]]; then
 fi
 
 # ── nbstripout git hook (skipped if git is not available) ────────────────────
+# .gitattributes is already tracked in the repo (filter=nbstripout on *.ipynb);
+# we only need to register the filter driver in .git/config for this clone.
 pip_install nbstripout --quiet
 if command -v git &>/dev/null && git -C "$REPO_ROOT" rev-parse --git-dir &>/dev/null; then
     log "Installing nbstripout git filter ..."
-    python3 -m nbstripout --install --attributes "$REPO_ROOT/.gitattributes"
+    nbstripout --install
     log "nbstripout installed — notebook outputs will be stripped on commit."
 else
     warn "git not found or not a git repo — skipping nbstripout filter registration."
-    log "nbstripout is installed; to enable later: python3 -m nbstripout --install"
+    log "nbstripout is installed; to enable later: nbstripout --install"
 fi
 
 # ── summary ───────────────────────────────────────────────────────────────────
