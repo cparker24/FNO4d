@@ -188,7 +188,7 @@ log "Captured $( wc -l < "$_ENV_CONSTRAINTS" | tr -d ' ' ) package constraints f
 # aiobotocore+botocore, then boto3 resolves without backtracking.
 if ! $PIP show botocore &>/dev/null 2>&1; then
     log "botocore not found in env — pre-installing s3fs to lock botocore before boto3 ..."
-    $PIP install s3fs
+    $PIP install s3fs -c "$_ENV_CONSTRAINTS"
 fi
 
 # ── main install ──────────────────────────────────────────────────────────────
