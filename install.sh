@@ -207,3 +207,27 @@ else
     log "  python -c \"import neuralop; import torch; print(torch.cuda.is_available())\""
 fi
 log "  python -c \"from loc_libs.read_3d_root import read_3d_data; print('loc_libs OK')\""
+echo ""
+log "Checking neuralop and loc_libs resolve to the local fork ..."
+python3 -c "
+import neuralop, loc_libs, os
+repo = os.path.abspath('$REPO_ROOT')
+no_path  = os.path.abspath(neuralop.__file__)
+loc_path = os.path.abspath(loc_libs.__file__)
+ok = True
+if repo in no_path:
+    print(f'[OK]   neuralop  -> {no_path}')
+else:
+    print(f'[WARN] neuralop  -> {no_path}')
+    print(f'       Expected path inside {repo} -- local fork may be shadowed!')
+    ok = False
+if repo in loc_path:
+    print(f'[OK]   loc_libs  -> {loc_path}')
+else:
+    print(f'[WARN] loc_libs  -> {loc_path}')
+    print(f'       Expected path inside {repo} -- local copy may be shadowed!')
+    ok = False
+if not ok:
+    print()
+    print('To debug: run pip list and check which neuraloperator / loc-libs entry appears first.')
+"
