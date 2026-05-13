@@ -289,7 +289,32 @@ install_torch_linux() {
     fi
 
     local _TORCH_SPEC="torch"
-    [[ -n "$TORCH_VERSION" ]] && _TORCH_SPEC="torch==${TORCH_VERSION}"
+    if [[ -n "$TORCH_VERSION" ]]; then
+        # PyTorch 2.6+ wheels on the custom index carry a local version suffix
+        # (+cpu, +cu124, …).  Pip's == operator does not match across local
+        # identifiers, so "torch==2.8.0" won't find "torch==2.8.0+cpu".
+        # Probe with --dry-run (fast, no download) to pick the right form.
+        local _SPEC_TAGGED="torch==${TORCH_VERSION}+${WHEEL_TAG}"
+        local _SPEC_PLAIN="torch==${TORCH_VERSION}"
+        log "Resolving torch==${TORCH_VERSION} on $INDEX_URL ..."
+        if $PIP install --dry-run --quiet "${_SPEC_TAGGED}" \
+                --index-url "$INDEX_URL" &>/dev/null; then
+            _TORCH_SPEC="$_SPEC_TAGGED"
+            log "  → using ${_SPEC_TAGGED}"
+        elif $PIP install --dry-run --quiet "${_SPEC_PLAIN}" \
+                --index-url "$INDEX_URL" &>/dev/null; then
+            _TORCH_SPEC="$_SPEC_PLAIN"
+            log "  → using ${_SPEC_PLAIN}"
+        else
+            # Neither form found — show available versions and abort.
+            echo >&2 ""
+            warn "torch==${TORCH_VERSION} not found on $INDEX_URL"
+            warn "Available versions:"
+            $PIP index versions torch --index-url "$INDEX_URL" 2>&1 \
+                | grep -i "Available versions" >&2 || true
+            die "Choose a valid version from the list above and re-run with --torch <version>."
+        fi
+    fi
     log "Installing ${_TORCH_SPEC} + torchvision from $INDEX_URL ..."
     $PIP install "${_TORCH_SPEC}" torchvision --index-url "$INDEX_URL"
 
@@ -302,6 +327,16 @@ if [[ "$PLATFORM" == "mac" ]]; then
     if [[ -n "$TORCH_VERSION" ]]; then
         log "Installing Mac Silicon requirements (base + mlx) with pinned torch==${TORCH_VERSION} ..."
         $PIP install -r "$REPO_ROOT/requirements-base.txt" "mlx>=0.16"
+        # PyPI mac wheels use plain version numbers (no +cpu suffix)
+        if ! $PIP install --dry-run --quiet "torch==${TORCH_VERSION}" \
+                &>/dev/null; then
+            echo >&2 ""
+            warn "torch==${TORCH_VERSION} not found on PyPI."
+            warn "Available versions:"
+            $PIP index versions torch 2>&1 \
+                | grep -i "Available versions" >&2 || true
+            die "Choose a valid version from the list above and re-run with --torch <version>."
+        fi
         $PIP install "torch==${TORCH_VERSION}" torchvision
     else
         log "Installing Mac Silicon requirements (torch + mlx + base) ..."
