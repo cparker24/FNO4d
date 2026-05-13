@@ -187,38 +187,51 @@ install_torch_linux() {
     $PIP install torch-harmonics
 }
 
+# ── freeze fsspec if already present in the environment ──────────────────────
+# zarr, uproot, and other base deps list fsspec as an optional/transitive dep.
+# If the environment already has a specific fsspec (e.g. conda or system
+# site-packages), create a one-line constraints file to prevent pip from
+# upgrading it during any install step below.  This avoids breaking packages
+# like datasets or lightning that cap fsspec at a particular version.
+_FSSPEC_CONSTRAINTS=""
+_FSSPEC_VER=$(python3 -c "import fsspec; print(fsspec.__version__)" 2>/dev/null || true)
+if [[ -n "$_FSSPEC_VER" ]]; then
+    _FSSPEC_CONSTRAINTS=$(mktemp /tmp/fno4d_fsspec.XXXXXX)
+    printf 'fsspec==%s\n' "$_FSSPEC_VER" > "$_FSSPEC_CONSTRAINTS"
+    log "Existing fsspec $_FSSPEC_VER detected — will constrain all installs to this version."
+fi
+# helper used by every pip install call below
+pip_install() { $PIP install ${_FSSPEC_CONSTRAINTS:+-c "$_FSSPEC_CONSTRAINTS"} "$@"; }
+
 # ── main install ──────────────────────────────────────────────────────────────
 if [[ "$PLATFORM" == "mac" ]]; then
     log "Installing Mac Silicon requirements (torch + mlx + base) ..."
-    $PIP install -r "$REPO_ROOT/requirements-mac.txt"
+    pip_install -r "$REPO_ROOT/requirements-mac.txt"
 
 elif [[ "$PLATFORM" == "linux" ]]; then
     install_torch_linux
     log "Installing Linux base requirements ..."
-    $PIP install -r "$REPO_ROOT/requirements-linux.txt"
+    pip_install -r "$REPO_ROOT/requirements-linux.txt"
 fi
 
 # ── cloud storage (opt-in) ────────────────────────────────────────────────────
-# s3fs, gcsfs, and fsspec are released in sync (same version numbers).  If
-# fsspec is already present in the environment, pin the fsspec-family packages
-# to that version so pip cannot upgrade fsspec past the existing ceiling (which
-# would break datasets/lightning already in the env).  Pre-installing the fsspec
-# driver also locks aiobotocore+botocore before boto3 arrives, which eliminates
-# the boto3 backtracking problem on a fresh environment.
+# s3fs, gcsfs, and fsspec are released in sync (same version numbers).
+# Pre-installing the fsspec driver also locks aiobotocore+botocore before
+# boto3 arrives, eliminating the boto3 backtracking problem on a fresh env.
 if [[ "$INSTALL_S3" == true || "$INSTALL_GCS" == true ]]; then
     _CLOUD_CONSTRAINTS=$(mktemp /tmp/fno4d_cloud.XXXXXX)
-    _FSSPEC_VER=$(python3 -c "import fsspec; print(fsspec.__version__)" 2>/dev/null || true)
+    # Start from the fsspec constraint we already have (if any)
+    [[ -n "$_FSSPEC_CONSTRAINTS" ]] && cat "$_FSSPEC_CONSTRAINTS" > "$_CLOUD_CONSTRAINTS"
 
     if [[ -n "$_FSSPEC_VER" ]]; then
-        log "Existing fsspec $_FSSPEC_VER detected — will pin fsspec family to this version."
-        printf 'fsspec==%s\n' "$_FSSPEC_VER" > "$_CLOUD_CONSTRAINTS"
+        log "Pinning s3fs/gcsfs to fsspec version $_FSSPEC_VER ..."
         [[ "$INSTALL_S3"  == true ]] && printf 's3fs==%s\n'  "$_FSSPEC_VER" >> "$_CLOUD_CONSTRAINTS"
         [[ "$INSTALL_GCS" == true ]] && printf 'gcsfs==%s\n' "$_FSSPEC_VER" >> "$_CLOUD_CONSTRAINTS"
     else
         # No existing fsspec — pre-install the driver(s) first to lock botocore
         # before boto3 arrives, then record the resolved version as a constraint.
-        [[ "$INSTALL_S3"  == true ]] && $PIP install s3fs
-        [[ "$INSTALL_GCS" == true ]] && $PIP install gcsfs
+        [[ "$INSTALL_S3"  == true ]] && pip_install s3fs
+        [[ "$INSTALL_GCS" == true ]] && pip_install gcsfs
         python3 -c "
 import sys
 try:
@@ -237,11 +250,11 @@ except ImportError: pass
 
     if [[ "$INSTALL_S3" == true ]]; then
         log "Installing S3 storage requirements (requirements-s3.txt) ..."
-        $PIP install -r "$REPO_ROOT/requirements-s3.txt" -c "$_CLOUD_CONSTRAINTS"
+        pip_install -r "$REPO_ROOT/requirements-s3.txt" -c "$_CLOUD_CONSTRAINTS"
     fi
     if [[ "$INSTALL_GCS" == true ]]; then
         log "Installing GCS storage requirements (requirements-gcs.txt) ..."
-        $PIP install -r "$REPO_ROOT/requirements-gcs.txt" -c "$_CLOUD_CONSTRAINTS"
+        pip_install -r "$REPO_ROOT/requirements-gcs.txt" -c "$_CLOUD_CONSTRAINTS"
     fi
 
     rm -f "$_CLOUD_CONSTRAINTS"
@@ -251,18 +264,18 @@ fi
 
 # ── local editable installs (both platforms) ──────────────────────────────────
 log "Installing loc_libs (editable) ..."
-$PIP install -e "$REPO_ROOT/loc_libs"
+pip_install -e "$REPO_ROOT/loc_libs"
 
 log "Installing neuraloperator-4d-2.0.0 (editable) ..."
-$PIP install -e "$REPO_ROOT/neuraloperator-4d-2.0.0"
+pip_install -e "$REPO_ROOT/neuraloperator-4d-2.0.0"
 
 if [[ "$PLATFORM" == "mac" ]]; then
     log "Installing neuralop_mlx (editable, from repo root) ..."
-    $PIP install -e "$REPO_ROOT"
+    pip_install -e "$REPO_ROOT"
 fi
 
 # ── nbstripout git hook (skipped if git is not available) ────────────────────
-$PIP install nbstripout --quiet
+pip_install nbstripout --quiet
 if command -v git &>/dev/null && git -C "$REPO_ROOT" rev-parse --git-dir &>/dev/null; then
     log "Installing nbstripout git filter ..."
     python3 -m nbstripout --install --attributes "$REPO_ROOT/.gitattributes"
@@ -314,3 +327,5 @@ if not ok:
     print()
     print('To debug: run pip list and check which neuraloperator / loc-libs entry appears first.')
 "
+
+rm -f "${_FSSPEC_CONSTRAINTS:-}"
