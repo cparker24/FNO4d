@@ -162,7 +162,7 @@ install_torch_linux() {
 # which avoids conflicts like s3fs dragging fsspec past the ceiling required by
 # datasets or lightning that are pre-installed in the base environment.
 _ENV_CONSTRAINTS=$(mktemp /tmp/fno4d_constraints.XXXXXX)
-$PIP freeze | grep -v '^-e ' > "$_ENV_CONSTRAINTS"
+$PIP freeze | grep -v '^-e ' | grep -v ' @ file://' > "$_ENV_CONSTRAINTS"
 log "Captured $( wc -l < "$_ENV_CONSTRAINTS" | tr -d ' ' ) package constraints from current environment."
 
 # ── main install ──────────────────────────────────────────────────────────────
