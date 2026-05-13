@@ -26,8 +26,8 @@ ruamel-yaml
 zencfg>=0.3.0
 configmypy
 
-# Notebook / app runner
-marimo
+# Notebook / app runner (marimo is used by train/apply.py but not installed by default)
+# marimo          # uncomment to install: marimo run/edit train/apply.py
 # jupyter         # uncomment if not provided by container / base environment
 # jupyterlab      # uncomment if not provided by container / base environment
 
