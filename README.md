@@ -99,15 +99,18 @@ environment from scratch, then installs all dependencies inside it.
 ```bash
 # virtualenv (default) — stored inside the repo as venv_fno4d/
 bash install_full.sh
-bash install_full.sh --name .venv           # custom path/name
-bash install_full.sh --name .venv --s3      # + S3 storage
-bash install_full.sh --name .venv --gcs     # + Google Cloud Storage
+bash install_full.sh --name .venv                        # custom path/name
+bash install_full.sh --name .venv --s3                   # + S3 storage
+bash install_full.sh --name .venv --gcs                  # + Google Cloud Storage
+bash install_full.sh --name .venv --torch 2.5.1          # pin a torch version
+bash install_full.sh --name .venv --torch 2.5.1 --s3     # pin torch + S3
 
 # conda — creates a new named conda env
-bash install_full.sh --conda                        # default name: fno4d
-bash install_full.sh --conda --name fno4d_cu124     # custom name
-bash install_full.sh --conda --name fno4d_s3 --s3   # + S3
-bash install_full.sh --conda --name fno4d_all --s3 --gcs  # + both cloud
+bash install_full.sh --conda                                    # default name: fno4d
+bash install_full.sh --conda --name fno4d_cu124                 # custom name
+bash install_full.sh --conda --name fno4d_251 --torch 2.5.1     # pin torch
+bash install_full.sh --conda --name fno4d_s3 --s3               # + S3
+bash install_full.sh --conda --name fno4d_all --s3 --gcs        # + both cloud
 ```
 
 Flags may be freely combined.  Run `bash install_full.sh --help` for details.
@@ -120,6 +123,7 @@ Flags may be freely combined.  Run `bash install_full.sh --help` for details.
 | `--venv` | Same as above; explicit form of the default. |
 | `--conda` | Creates a new named conda env (`python=3.11`) via `conda create`. |
 | `--name NAME` | Override the environment name/path (`venv_fno4d` or `fno4d` by default). |
+| `--torch VERSION` | Pin a specific PyTorch version, e.g. `--torch 2.5.1`. Default: latest available for the detected CUDA / platform. `torchvision` is resolved automatically. |
 | `--s3` | Also installs `requirements-s3.txt`: `s3fs` + `boto3`. |
 | `--gcs` | Also installs `requirements-gcs.txt`: `gcsfs` + `google-cloud-storage`. |
 

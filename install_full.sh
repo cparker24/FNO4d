@@ -48,6 +48,9 @@ Options:
   --name NAME     Environment name or path.
                     virtualenv default: venv_fno4d  (inside repo root)
                     conda default:      fno4d
+  --torch VERSION Pin a specific PyTorch version (default: latest available).
+                  Example: --torch 2.5.1
+                  The matching torchvision is resolved automatically.
   --s3            Install S3 / S3-compatible backend (s3fs, boto3).
                   Enables s3:// URIs in read_3d_root.py / read_3d_hdf5.py.
   --gcs           Install Google Cloud Storage backend (gcsfs, google-cloud-storage).
@@ -56,12 +59,14 @@ Options:
 
 Flags may be combined, e.g.:
   bash install_full.sh --conda --name fno4d_s3 --s3 --gcs
+  bash install_full.sh --venv --torch 2.5.1 --s3
 EOF
 }
 
 # ── parse flags ───────────────────────────────────────────────────────────────
 ENV_TYPE=""       # venv | conda
 ENV_NAME=""
+TORCH_VERSION=""  # empty = latest
 INSTALL_S3=false
 INSTALL_GCS=false
 
@@ -71,6 +76,8 @@ while [[ $# -gt 0 ]]; do
         --conda)       ENV_TYPE=conda ;;
         --name)        [[ $# -ge 2 ]] || die "--name requires a value"; ENV_NAME="$2"; shift ;;
         --name=*)      ENV_NAME="${1#--name=}" ;;
+        --torch)       [[ $# -ge 2 ]] || die "--torch requires a version, e.g. --torch 2.5.1"; TORCH_VERSION="$2"; shift ;;
+        --torch=*)     TORCH_VERSION="${1#--torch=}" ;;
         --s3)          INSTALL_S3=true ;;
         --gcs)         INSTALL_GCS=true ;;
         -h|--help)     usage; exit 0 ;;
@@ -281,8 +288,10 @@ install_torch_linux() {
         INDEX_URL="https://download.pytorch.org/whl/${WHEEL_TAG}"
     fi
 
-    log "Installing torch + torchvision from $INDEX_URL ..."
-    $PIP install torch torchvision --index-url "$INDEX_URL"
+    local _TORCH_SPEC="torch"
+    [[ -n "$TORCH_VERSION" ]] && _TORCH_SPEC="torch==${TORCH_VERSION}"
+    log "Installing ${_TORCH_SPEC} + torchvision from $INDEX_URL ..."
+    $PIP install "${_TORCH_SPEC}" torchvision --index-url "$INDEX_URL"
 
     log "Installing torch-harmonics ..."
     $PIP install torch-harmonics
@@ -290,8 +299,14 @@ install_torch_linux() {
 
 # ── main install ──────────────────────────────────────────────────────────────
 if [[ "$PLATFORM" == "mac" ]]; then
-    log "Installing Mac Silicon requirements (torch + mlx + base) ..."
-    $PIP install -r "$REPO_ROOT/requirements-mac.txt"
+    if [[ -n "$TORCH_VERSION" ]]; then
+        log "Installing Mac Silicon requirements (base + mlx) with pinned torch==${TORCH_VERSION} ..."
+        $PIP install -r "$REPO_ROOT/requirements-base.txt" "mlx>=0.16"
+        $PIP install "torch==${TORCH_VERSION}" torchvision
+    else
+        log "Installing Mac Silicon requirements (torch + mlx + base) ..."
+        $PIP install -r "$REPO_ROOT/requirements-mac.txt"
+    fi
 
 elif [[ "$PLATFORM" == "linux" ]]; then
     install_torch_linux
