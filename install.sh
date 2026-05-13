@@ -183,8 +183,10 @@ install_torch_linux() {
     $PIP install torch torchvision --index-url "$INDEX_URL"
 
     # torch-harmonics: Linux-only (needed for neuraloperator DISCO layers)
-    log "Installing torch-harmonics ..."
-    $PIP install torch-harmonics
+    # some issues with installing and neuraloperator, since not needed initally
+    # comments out for now ...
+    #log "Installing torch-harmonics ..."
+    #$PIP install torch-harmonics
 }
 
 # ── freeze fsspec if already present in the environment ──────────────────────

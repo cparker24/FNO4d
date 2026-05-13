@@ -350,8 +350,10 @@ install_torch_linux() {
         $PIP install "${_TORCH_SPEC}" torchvision --index-url "$INDEX_URL"
     fi
 
-    log "Installing torch-harmonics ..."
-    $PIP install torch-harmonics
+    # some issues with installing and neuraloperator, since not needed initally
+    # comments out for now ...
+    #log "Installing torch-harmonics ..."
+    #$PIP install torch-harmonics
 }
 
 # ── main install ──────────────────────────────────────────────────────────────
