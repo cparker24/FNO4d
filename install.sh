@@ -155,46 +155,25 @@ install_torch_linux() {
     $PIP install torch-harmonics
 }
 
-# ── snapshot installed packages as constraints ───────────────────────────────
-# Freeze the current environment into a constraints file so pip cannot silently
-# upgrade packages that are already present (e.g. fsspec in a conda env).
-# Packages we explicitly list in our requirements files are excluded from the
-# constraints so that our own pins always win over whatever the env has.
-_ENV_CONSTRAINTS=$(mktemp /tmp/fno4d_constraints.XXXXXX)
-$PIP freeze \
-  | grep -v '^-e ' \
-  | grep -v ' @ file://' \
-  | python3 -c "
-import sys, re, os
-repo = os.environ.get('REPO_ROOT', '.')
-our_pkgs = set()
-for rf in ['requirements-base.txt', 'requirements-mac.txt', 'requirements-linux.txt']:
-    try:
-        for line in open(os.path.join(repo, rf)):
-            line = line.strip()
-            if line and not line.startswith('#') and not line.startswith('-'):
-                name = re.split(r'[>=<! \[\@;]', line)[0].lower().replace('-','_')
-                our_pkgs.add(name)
-    except FileNotFoundError:
-        pass
-for line in sys.stdin:
-    name = re.split(r'[>=<! \[\@;=]', line.strip())[0].lower().replace('-','_')
-    if name not in our_pkgs:
-        sys.stdout.write(line)
-" > "$_ENV_CONSTRAINTS"
-log "Captured $( wc -l < "$_ENV_CONSTRAINTS" | tr -d ' ' ) package constraints from current environment (excluding packages we manage)."
-
-# In a fresh env botocore is not yet locked, so install s3fs first — that pins
-# aiobotocore+botocore, then boto3 resolves without backtracking.
-if ! $PIP show botocore &>/dev/null 2>&1; then
-    log "botocore not found in env — pre-installing s3fs to lock botocore before boto3 ..."
-    $PIP install s3fs -c "$_ENV_CONSTRAINTS"
+# ── pin s3fs/gcsfs to match any existing fsspec in the environment ────────────
+# s3fs, gcsfs, and fsspec all share the same version number (fsspec org releases
+# them in sync).  If fsspec is already installed (e.g. from conda or the system
+# site-packages), install s3fs and gcsfs at that exact version so they don't
+# trigger a conflicting fsspec upgrade.  This also pre-installs aiobotocore and
+# locks botocore before boto3 arrives, eliminating the boto3 backtracking problem.
+_FSSPEC_VER=$(python3 -c "import fsspec; print(fsspec.__version__)" 2>/dev/null || true)
+if [[ -n "$_FSSPEC_VER" ]]; then
+    log "Existing fsspec $_FSSPEC_VER detected — pre-installing s3fs==$_FSSPEC_VER gcsfs==$_FSSPEC_VER ..."
+    $PIP install "s3fs==$_FSSPEC_VER" "gcsfs==$_FSSPEC_VER"
+else
+    log "No existing fsspec — pre-installing s3fs/gcsfs (latest) to lock botocore before boto3 ..."
+    $PIP install s3fs gcsfs
 fi
 
 # ── main install ──────────────────────────────────────────────────────────────
 if [[ "$PLATFORM" == "mac" ]]; then
     log "Installing Mac Silicon requirements (torch + mlx + base) ..."
-    $PIP install -r "$REPO_ROOT/requirements-mac.txt" -c "$_ENV_CONSTRAINTS"
+    $PIP install -r "$REPO_ROOT/requirements-mac.txt"
 
 elif [[ "$PLATFORM" == "linux" ]]; then
     install_torch_linux
@@ -267,6 +246,3 @@ if not ok:
     print()
     print('To debug: run pip list and check which neuraloperator / loc-libs entry appears first.')
 "
-
-# clean up temporary constraints file
-rm -f "$_ENV_CONSTRAINTS"
