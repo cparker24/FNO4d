@@ -267,7 +267,7 @@ install_torch_linux() {
         else                                  WHEEL_TAG="cu128"
         fi
     elif [[ "$CUDA_MAJOR" -ge 13 ]]; then
-        CANDIDATE="cu${CUDA_MAJOR}$(printf '%02d' "$CUDA_MINOR")"
+        CANDIDATE="cu${CUDA_MAJOR}${CUDA_MINOR}"
         INDEX_URL="https://download.pytorch.org/whl/${CANDIDATE}"
         log "CUDA $CUDA_MAJOR.$CUDA_MINOR — trying wheel tag $CANDIDATE ..."
         if $PIP index versions torch --index-url "$INDEX_URL" &>/dev/null 2>&1; then
