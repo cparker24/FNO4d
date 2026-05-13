@@ -40,7 +40,11 @@ configmypy
 # s3fs and gcsfs version bands are chosen to be compatible with that fsspec range.
 fsspec>=2023.1.0,<2025.0   # pin before s3fs/gcsfs can upgrade it
 s3fs<2025.0                # fsspec driver for S3-compatible services (Lambda, MinIO, …)
-boto3                      # direct AWS S3 Python API
+# boto3 + aiobotocore must use the same botocore minor series.  Pinning aiobotocore
+# here makes pip see the botocore constraint immediately and avoids backtracking
+# through hundreds of boto3 releases.
+aiobotocore>=2.15.0,<2.16  # s3fs<2025.0 uses aiobotocore 2.15.x; pin to expose botocore range
+boto3>=1.35.0,<1.36        # botocore 1.35.x — same series as aiobotocore 2.15.x
 gcsfs<2025.0               # fsspec driver for Google Cloud Storage
 google-cloud-storage       # direct GCS Python API
 
