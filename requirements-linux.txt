@@ -1,0 +1,15 @@
+# ── FNO4d Linux / Lambda requirements ────────────────────────────────────────
+# For use on Linux GPU instances (Lambda, AWS, GCP, on-prem).
+#
+# torch is intentionally NOT listed here.  install.sh handles it:
+#   • If torch is already importable (Docker image / conda / system-site-packages)
+#     → nothing to do.
+#   • Otherwise → CUDA version is detected via nvidia-smi and the matching
+#     PyTorch wheel is installed automatically, together with torch-harmonics.
+#
+# mlx is Apple-only and is never installed on Linux.
+#
+# Usage (let install.sh handle torch detection, or activate your env first):
+#   pip install -r requirements-linux.txt
+
+-r requirements-base.txt

@@ -33,7 +33,7 @@ lr = 8e-3
 weight_decay = 1e-4
 # optimizer = AdamW(model.parameters(), lr=8e-3, weight_decay=1e-4)
 
-log = open(f'{odir}/log.txt','w')
+log = open(f'{odir}/log.log','w')
 log.write(f'input dir: {input_dir}\n')
 log.write(f'input files: {input_files}\n')
 log.write(f'n_epochs: {n_epochs}\n')

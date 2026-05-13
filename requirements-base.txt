@@ -1,0 +1,40 @@
+# ── FNO4d base requirements ──────────────────────────────────────────────────
+# Shared across all platforms (Mac Silicon + Linux/Lambda).
+# torch / mlx are NOT listed here — handled per-platform in install.sh
+# or via requirements-mac.txt / requirements-linux.txt.
+
+# Data I/O — ROOT files and HDF5
+numpy>=1.25
+uproot
+awkward
+h5py
+zarr
+
+# Scientific computing
+opt-einsum
+tensorly
+tensorly-torch
+scikit-image
+
+# Visualisation & system monitoring
+matplotlib
+psutil
+
+# Config / experiment tracking
+wandb
+ruamel-yaml
+zencfg>=0.3.0
+configmypy
+
+# Notebook / app runner (marimo is used by train/apply.py but not installed by default)
+# marimo          # uncomment to install: marimo run/edit train/apply.py
+# jupyter         # uncomment if not provided by container / base environment
+# jupyterlab      # uncomment if not provided by container / base environment
+
+# Cloud storage — opt-in via install.sh flags or separate requirements files
+# Use: bash install.sh --s3        → installs requirements-s3.txt
+#      bash install.sh --gcs       → installs requirements-gcs.txt
+#      bash install.sh --s3 --gcs  → both
+# Or manually: pip install -r requirements-s3.txt / requirements-gcs.txt
+# Both backends use uproot's storage_options to access s3:// and gs:// URIs
+# in loc_libs/read_3d_root.py and read_3d_hdf5.py.

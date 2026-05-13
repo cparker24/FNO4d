@@ -1,7 +1,6 @@
 # This file is an updated an pared-down version of controur_v_plot.py
 import numpy as np 
 import matplotlib.pyplot as plt
-import seaborn as sns
 from collections import namedtuple
 from skimage.measure import find_contours
 

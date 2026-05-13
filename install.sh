@@ -1,0 +1,331 @@
+#!/usr/bin/env bash
+# install.sh — FNO4d environment setup
+#
+# Detects platform (Mac arm64 / Linux x86_64 / Linux aarch64) and creates a
+# virtualenv with --system-site-packages so that packages already present in
+# the system Python, a conda env, or a Docker image are visible without
+# reinstalling them.
+#
+# Usage:
+#   bash install.sh                 # base + platform deps only (no cloud storage)
+#   bash install.sh --s3            # + AWS S3 / S3-compatible (s3fs, boto3)
+#   bash install.sh --gcs           # + Google Cloud Storage (gcsfs, google-cloud-storage)
+#   bash install.sh --s3 --gcs      # + both cloud backends
+#   bash install.sh --conda         # install into active non-base conda env (no venv)
+#
+# Cloud flags install requirements-s3.txt / requirements-gcs.txt on top of base.
+# The fsspec family (s3fs, gcsfs, fsspec) is pinned to match any version already
+# present in the environment to avoid conflicts with datasets/lightning.
+# The --conda flag is useful when you want packages registered in the conda
+# env itself (e.g. for conda-managed torch builds). It is refused if the
+# active env is 'base'.
+
+set -euo pipefail
+
+# ── helpers ──────────────────────────────────────────────────────────────────
+log()  { echo "[install.sh] $*"; }
+warn() { echo "[install.sh] WARNING: $*" >&2; }
+die()  { echo "[install.sh] ERROR: $*" >&2; exit 1; }
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_ROOT"
+
+# ── parse flags ───────────────────────────────────────────────────────────────
+usage() {
+    cat <<EOF
+Usage: bash install.sh [OPTIONS]
+
+Options:
+  --s3      Install S3 / S3-compatible storage backend (s3fs, boto3).
+            Enables s3:// URIs in read_3d_root.py / read_3d_hdf5.py.
+  --gcs     Install Google Cloud Storage backend (gcsfs, google-cloud-storage).
+            Enables gs:// URIs in read_3d_root.py / read_3d_hdf5.py.
+  --conda   Install into the currently active named conda env instead of
+            creating a venv.  Refused if the active env is 'base'.
+  -h, --help  Show this help message and exit.
+
+Flags may be combined freely, e.g.:
+  bash install.sh --s3 --gcs
+  bash install.sh --conda --s3
+
+Default (no flags): creates/reuses venv/ with --system-site-packages,
+installs base + platform deps only (no cloud storage).
+EOF
+}
+
+USE_CONDA_FLAG=false
+INSTALL_S3=false
+INSTALL_GCS=false
+for arg in "$@"; do
+    case "$arg" in
+        --conda)       USE_CONDA_FLAG=true ;;
+        --s3)          INSTALL_S3=true ;;
+        --gcs)         INSTALL_GCS=true ;;
+        -h|--help)     usage; exit 0 ;;
+        *) die "Unknown argument: $arg  (run 'bash install.sh --help' for usage)" ;;
+    esac
+done
+
+# ── detect platform ───────────────────────────────────────────────────────────
+OS="$(uname -s)"    # Darwin | Linux
+ARCH="$(uname -m)"  # arm64 | x86_64 | aarch64
+
+log "Platform: OS=$OS  ARCH=$ARCH"
+
+if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
+    PLATFORM="mac"
+elif [[ "$OS" == "Linux" ]]; then
+    PLATFORM="linux"
+else
+    die "Unsupported platform: OS=$OS ARCH=$ARCH"
+fi
+
+# ── set up environment ────────────────────────────────────────────────────────
+USING_CONDA=false
+
+if [[ "$USE_CONDA_FLAG" == true ]]; then
+    # --conda: install into active named conda env (no venv)
+    if [[ -z "${CONDA_PREFIX:-}" ]]; then
+        die "--conda specified but no conda environment is active. Run 'conda activate <name>' first."
+    fi
+    if [[ "${CONDA_DEFAULT_ENV:-}" == "base" ]]; then
+        die "--conda specified but the active env is 'base'. Activate a named env first."
+    fi
+    log "Using conda env: $CONDA_PREFIX  (env: ${CONDA_DEFAULT_ENV:-unknown})"
+    USING_CONDA=true
+    PIP="python -m pip"
+else
+    # Default: always create/reuse a virtualenv with --system-site-packages.
+    # This works whether conda is active or not — the venv inherits whatever
+    # is installed in the parent Python (conda env, system, Docker image).
+    if [[ -n "${CONDA_PREFIX:-}" ]]; then
+        log "conda env '${CONDA_DEFAULT_ENV:-}' is active — venv will inherit its packages via --system-site-packages."
+    fi
+    VENV_DIR="$REPO_ROOT/venv"
+    if [[ -d "$VENV_DIR" ]]; then
+        log "Existing virtualenv found at $VENV_DIR — reusing it."
+    else
+        log "Creating virtualenv at $VENV_DIR (--system-site-packages) ..."
+        python3 -m venv "$VENV_DIR" --system-site-packages
+    fi
+    # shellcheck disable=SC1091
+    source "$VENV_DIR/bin/activate"
+    PIP="python -m pip"
+    log "Virtualenv activated: $VENV_DIR"
+fi
+
+$PIP install --upgrade pip --quiet
+
+# ── Linux: torch detection and CUDA-aware install ────────────────────────────
+install_torch_linux() {
+    if python3 -c "import torch" 2>/dev/null; then
+        log "torch already importable — skipping torch install."
+        return
+    fi
+
+    warn "torch not found. Detecting CUDA version ..."
+
+    CUDA_MAJOR=""
+    CUDA_MINOR=""
+
+    if command -v nvidia-smi &>/dev/null; then
+        # nvidia-smi output: "CUDA Version: 12.4" (or similar)
+        CUDA_VER=$(nvidia-smi | grep -oP "CUDA Version: \K[0-9]+\.[0-9]+" || true)
+        if [[ -n "$CUDA_VER" ]]; then
+            CUDA_MAJOR=$(echo "$CUDA_VER" | cut -d. -f1)
+            CUDA_MINOR=$(echo "$CUDA_VER" | cut -d. -f2)
+            log "Detected CUDA $CUDA_MAJOR.$CUDA_MINOR"
+        else
+            warn "nvidia-smi found but could not parse CUDA version."
+        fi
+    else
+        warn "nvidia-smi not found."
+    fi
+
+    # Map CUDA version to wheel tag
+    WHEEL_TAG=""
+    if [[ -z "$CUDA_MAJOR" ]]; then
+        warn "No GPU detected — installing CPU-only torch. Training will be slow!"
+        WHEEL_TAG="cpu"
+    elif [[ "$CUDA_MAJOR" -eq 11 && "$CUDA_MINOR" -ge 8 ]]; then
+        WHEEL_TAG="cu118"
+    elif [[ "$CUDA_MAJOR" -eq 12 ]]; then
+        if   [[ "$CUDA_MINOR" -le 3 ]]; then WHEEL_TAG="cu121"
+        elif [[ "$CUDA_MINOR" -le 7 ]]; then WHEEL_TAG="cu124"
+        else                                  WHEEL_TAG="cu128"
+        fi
+    elif [[ "$CUDA_MAJOR" -ge 13 ]]; then
+        # Try the exact cu<MAJOR><MINOR_PADDED> tag first; fall back to cu128
+        CANDIDATE="cu${CUDA_MAJOR}${CUDA_MINOR}"
+        INDEX_URL="https://download.pytorch.org/whl/${CANDIDATE}"
+        log "CUDA $CUDA_MAJOR.$CUDA_MINOR — trying wheel tag $CANDIDATE ..."
+        # Probe: check if any torch wheel exists under this tag
+        if pip index versions torch --index-url "$INDEX_URL" &>/dev/null 2>&1; then
+            WHEEL_TAG="$CANDIDATE"
+            log "Found wheels for $CANDIDATE."
+        else
+            warn "No PyTorch wheels found for $CANDIDATE — falling back to cu128."
+            warn "Check https://pytorch.org/get-started/locally/ for the latest supported tag."
+            WHEEL_TAG="cu128"
+        fi
+    else
+        warn "Unrecognised CUDA version $CUDA_MAJOR.$CUDA_MINOR — falling back to cu128."
+        WHEEL_TAG="cu128"
+    fi
+
+    if [[ "$WHEEL_TAG" == "cpu" ]]; then
+        INDEX_URL="https://download.pytorch.org/whl/cpu"
+    else
+        INDEX_URL="https://download.pytorch.org/whl/${WHEEL_TAG}"
+    fi
+
+    log "Installing torch + torchvision from $INDEX_URL ..."
+    $PIP install torch torchvision --index-url "$INDEX_URL"
+
+    # torch-harmonics: Linux-only (needed for neuraloperator DISCO layers)
+    log "Installing torch-harmonics ..."
+    $PIP install torch-harmonics
+}
+
+# ── freeze fsspec if already present in the environment ──────────────────────
+# zarr, uproot, and other base deps list fsspec as an optional/transitive dep.
+# If the environment already has a specific fsspec (e.g. conda or system
+# site-packages), create a one-line constraints file to prevent pip from
+# upgrading it during any install step below.  This avoids breaking packages
+# like datasets or lightning that cap fsspec at a particular version.
+_FSSPEC_CONSTRAINTS=""
+_FSSPEC_VER=$(python3 -c "import fsspec; print(fsspec.__version__)" 2>/dev/null || true)
+if [[ -n "$_FSSPEC_VER" ]]; then
+    _FSSPEC_CONSTRAINTS=$(mktemp /tmp/fno4d_fsspec.XXXXXX)
+    printf 'fsspec==%s\n' "$_FSSPEC_VER" > "$_FSSPEC_CONSTRAINTS"
+    log "Existing fsspec $_FSSPEC_VER detected — will constrain all installs to this version."
+fi
+# helper used by every pip install call below
+pip_install() { $PIP install ${_FSSPEC_CONSTRAINTS:+-c "$_FSSPEC_CONSTRAINTS"} "$@"; }
+
+# ── main install ──────────────────────────────────────────────────────────────
+if [[ "$PLATFORM" == "mac" ]]; then
+    log "Installing Mac Silicon requirements (torch + mlx + base) ..."
+    pip_install -r "$REPO_ROOT/requirements-mac.txt"
+
+elif [[ "$PLATFORM" == "linux" ]]; then
+    install_torch_linux
+    log "Installing Linux base requirements ..."
+    pip_install -r "$REPO_ROOT/requirements-linux.txt"
+fi
+
+# ── cloud storage (opt-in) ────────────────────────────────────────────────────
+# s3fs, gcsfs, and fsspec are released in sync (same version numbers).
+# Pre-installing the fsspec driver also locks aiobotocore+botocore before
+# boto3 arrives, eliminating the boto3 backtracking problem on a fresh env.
+if [[ "$INSTALL_S3" == true || "$INSTALL_GCS" == true ]]; then
+    _CLOUD_CONSTRAINTS=$(mktemp /tmp/fno4d_cloud.XXXXXX)
+    # Start from the fsspec constraint we already have (if any)
+    [[ -n "$_FSSPEC_CONSTRAINTS" ]] && cat "$_FSSPEC_CONSTRAINTS" > "$_CLOUD_CONSTRAINTS"
+
+    if [[ -n "$_FSSPEC_VER" ]]; then
+        log "Pinning s3fs/gcsfs to fsspec version $_FSSPEC_VER ..."
+        [[ "$INSTALL_S3"  == true ]] && printf 's3fs==%s\n'  "$_FSSPEC_VER" >> "$_CLOUD_CONSTRAINTS"
+        [[ "$INSTALL_GCS" == true ]] && printf 'gcsfs==%s\n' "$_FSSPEC_VER" >> "$_CLOUD_CONSTRAINTS"
+    else
+        # No existing fsspec — pre-install the driver(s) first to lock botocore
+        # before boto3 arrives, then record the resolved version as a constraint.
+        [[ "$INSTALL_S3"  == true ]] && pip_install s3fs
+        [[ "$INSTALL_GCS" == true ]] && pip_install gcsfs
+        python3 -c "
+import sys
+try:
+    import fsspec; print('fsspec=='+fsspec.__version__)
+except ImportError: pass
+try:
+    import s3fs;   print('s3fs=='+s3fs.__version__)
+except ImportError: pass
+try:
+    import gcsfs;  print('gcsfs=='+gcsfs.__version__)
+except ImportError: pass
+" > "$_CLOUD_CONSTRAINTS" 2>/dev/null || true
+    fi
+
+    log "Cloud constraints: $(tr '\n' ' ' < "$_CLOUD_CONSTRAINTS")"
+
+    if [[ "$INSTALL_S3" == true ]]; then
+        log "Installing S3 storage requirements (requirements-s3.txt) ..."
+        pip_install -r "$REPO_ROOT/requirements-s3.txt" -c "$_CLOUD_CONSTRAINTS"
+    fi
+    if [[ "$INSTALL_GCS" == true ]]; then
+        log "Installing GCS storage requirements (requirements-gcs.txt) ..."
+        pip_install -r "$REPO_ROOT/requirements-gcs.txt" -c "$_CLOUD_CONSTRAINTS"
+    fi
+
+    rm -f "$_CLOUD_CONSTRAINTS"
+else
+    log "Cloud storage not requested. Re-run with --s3 and/or --gcs to add cloud backends."
+fi
+
+# ── local editable installs (both platforms) ──────────────────────────────────
+log "Installing loc_libs (editable) ..."
+pip_install -e "$REPO_ROOT/loc_libs"
+
+log "Installing neuraloperator-4d-2.0.0 (editable) ..."
+pip_install -e "$REPO_ROOT/neuraloperator-4d-2.0.0"
+
+if [[ "$PLATFORM" == "mac" ]]; then
+    log "Installing neuralop_mlx (editable, from repo root) ..."
+    pip_install -e "$REPO_ROOT"
+fi
+
+# ── nbstripout git hook (skipped if git is not available) ────────────────────
+pip_install nbstripout --quiet
+if command -v git &>/dev/null && git -C "$REPO_ROOT" rev-parse --git-dir &>/dev/null; then
+    log "Installing nbstripout git filter ..."
+    python3 -m nbstripout --install --attributes "$REPO_ROOT/.gitattributes"
+    log "nbstripout installed — notebook outputs will be stripped on commit."
+else
+    warn "git not found or not a git repo — skipping nbstripout filter registration."
+    log "nbstripout is installed; to enable later: python3 -m nbstripout --install"
+fi
+
+# ── summary ───────────────────────────────────────────────────────────────────
+echo ""
+log "Done."
+if [[ "$USING_CONDA" == true ]]; then
+    log "Installed into conda env: $CONDA_PREFIX  (${CONDA_DEFAULT_ENV:-})"
+    log "No activation needed — already in the target env."
+else
+    log "Virtualenv: $REPO_ROOT/venv  (--system-site-packages)"
+    log "To activate: source $REPO_ROOT/venv/bin/activate"
+fi
+echo ""
+log "Verify with:"
+if [[ "$PLATFORM" == "mac" ]]; then
+    log "  python -c \"import neuralop_mlx; import neuralop; import mlx.core; import torch; print('OK')\""
+else
+    log "  python -c \"import neuralop; import torch; print(torch.cuda.is_available())\""
+fi
+log "  python -c \"from loc_libs.read_3d_root import read_3d_data; print('loc_libs OK')\""
+echo ""
+log "Checking neuralop and loc_libs resolve to the local fork ..."
+python3 -c "
+import neuralop, loc_libs, os
+repo = os.path.abspath('$REPO_ROOT')
+no_path  = os.path.abspath(neuralop.__file__)
+loc_path = os.path.abspath(loc_libs.__file__)
+ok = True
+if repo in no_path:
+    print(f'[OK]   neuralop  -> {no_path}')
+else:
+    print(f'[WARN] neuralop  -> {no_path}')
+    print(f'       Expected path inside {repo} -- local fork may be shadowed!')
+    ok = False
+if repo in loc_path:
+    print(f'[OK]   loc_libs  -> {loc_path}')
+else:
+    print(f'[WARN] loc_libs  -> {loc_path}')
+    print(f'       Expected path inside {repo} -- local copy may be shadowed!')
+    ok = False
+if not ok:
+    print()
+    print('To debug: run pip list and check which neuraloperator / loc-libs entry appears first.')
+"
+
+rm -f "${_FSSPEC_CONSTRAINTS:-}"

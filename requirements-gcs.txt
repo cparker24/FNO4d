@@ -1,0 +1,14 @@
+# ── Google Cloud Storage ──────────────────────────────────────────────────────
+# Install with:  bash install.sh --gcs
+# or manually:   pip install -r requirements-gcs.txt
+#
+# gcsfs hooks into uproot/fsspec so gs:// URIs work in read_3d_root.py and
+# read_3d_hdf5.py via the storage_options argument.
+# google-cloud-storage gives you the synchronous GCS client library for direct
+# bucket/blob API calls.
+#
+# Version notes:
+#   gcsfs and fsspec are released in sync — same version numbers.  install.sh
+#   detects any existing fsspec and pins gcsfs to match, so no version pins here.
+gcsfs                # fsspec driver for Google Cloud Storage
+google-cloud-storage # synchronous GCS client library (google.cloud.storage)

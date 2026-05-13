@@ -1,0 +1,15 @@
+# ── AWS S3 / S3-compatible storage (Lambda, MinIO, Ceph, …) ──────────────────
+# Install with:  bash install.sh --s3
+# or manually:   pip install -r requirements-s3.txt
+#
+# s3fs hooks into uproot/fsspec so s3:// URIs work in read_3d_root.py and
+# read_3d_hdf5.py via the storage_options argument.
+# boto3 gives you the synchronous AWS SDK for direct S3 API calls.
+#
+# Version notes:
+#   s3fs, fsspec, gcsfs are released in sync by the fsspec org — same version
+#   numbers.  install.sh detects any existing fsspec and pins s3fs to match,
+#   so this file intentionally has no version pins.  On a fresh environment the
+#   latest compatible set is resolved automatically.
+s3fs   # fsspec driver for S3-compatible services; pulls in aiobotocore + botocore
+boto3  # synchronous AWS SDK — botocore version is already locked by s3fs above

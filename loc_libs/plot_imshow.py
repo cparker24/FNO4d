@@ -8,7 +8,6 @@
 # 3. plot the colorbars for the plots with the "topographical" lines too
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 from collections import namedtuple
 from skimage.measure import find_contours
 
