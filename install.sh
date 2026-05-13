@@ -178,7 +178,7 @@ if [[ "$PLATFORM" == "mac" ]]; then
 elif [[ "$PLATFORM" == "linux" ]]; then
     install_torch_linux
     log "Installing Linux base requirements ..."
-    $PIP install -r "$REPO_ROOT/requirements-linux.txt" -c "$_ENV_CONSTRAINTS"
+    $PIP install -r "$REPO_ROOT/requirements-linux.txt"
 fi
 
 # ── local editable installs (both platforms) ──────────────────────────────────
