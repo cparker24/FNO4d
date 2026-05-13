@@ -309,9 +309,12 @@ install_torch_linux() {
             # Neither form found — show available versions and abort.
             echo >&2 ""
             warn "torch==${TORCH_VERSION} not found on $INDEX_URL"
-            warn "Available versions:"
+            warn "Available versions (pass one of these to --torch):"
             $PIP index versions torch --index-url "$INDEX_URL" 2>&1 \
-                | grep -i "Available versions" >&2 || true
+                | grep -i "Available versions" \
+                | sed 's/+[a-zA-Z0-9]*//g' \
+                | tr ',' '\n' \
+                | sed 's/[[:space:]]//g; /^$/d; s/Availableversions://g' >&2 || true
             die "Choose a valid version from the list above and re-run with --torch <version>."
         fi
     fi
@@ -332,9 +335,12 @@ if [[ "$PLATFORM" == "mac" ]]; then
                 &>/dev/null; then
             echo >&2 ""
             warn "torch==${TORCH_VERSION} not found on PyPI."
-            warn "Available versions:"
+            warn "Available versions (pass one of these to --torch):"
             $PIP index versions torch 2>&1 \
-                | grep -i "Available versions" >&2 || true
+                | grep -i "Available versions" \
+                | sed 's/+[a-zA-Z0-9]*//g' \
+                | tr ',' '\n' \
+                | sed 's/[[:space:]]//g; /^$/d; s/Availableversions://g' >&2 || true
             die "Choose a valid version from the list above and re-run with --torch <version>."
         fi
         $PIP install "torch==${TORCH_VERSION}" torchvision
