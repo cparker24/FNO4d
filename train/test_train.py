@@ -14,7 +14,7 @@
 
 # training parameters
 odir = f'./'
-input_dir = '/Users/du8478/FNO_Hydro_Data/flat'
+input_dir = './' # /Users/du8478/FNO_Hydro_Data/flat'
 input_files = ['dAu_25ev_mb.root'] #11steps_4Kev_b_lt_2fm.root']
 
 n_epochs = 1
@@ -205,10 +205,10 @@ log.write(f'data_verify shape: {data_verify.shape}\n')
 # plt.imshow(data_train[0,0,:,:,0,0])
 
 # get the input device
-#device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 #torch.cuda.empty_cache()
 
-device = 'cpu' # for Apple Sillcon somehow not converging on my macboock M1 as compared to running with CPU
+#device = 'cpu' # for Apple Sillcon somehow not converging on my macboock M1 as compared to running with CPU
 #print('Using device:', device)
 
 print(f'Using device: {device}')
@@ -257,7 +257,7 @@ for res, test_bsize in zip(test_resolutions, test_batch_sizes):
                                    persistent_workers=False,)
 
 gc.collect()
-torch.mps.empty_cache()
+#torch.mps.empty_cache()
 
 
 # make the model and print the memory size of the model
