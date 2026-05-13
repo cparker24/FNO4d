@@ -21,6 +21,8 @@ FNO4d/
 ├── requirements-base.txt        # shared deps (both platforms)
 ├── requirements-mac.txt         # Mac Silicon: adds torch + mlx
 ├── requirements-linux.txt       # Linux/Lambda: adds nothing (torch auto-detected)
+├── requirements-s3.txt          # opt-in: S3 / S3-compatible (--s3 flag)
+├── requirements-gcs.txt         # opt-in: Google Cloud Storage (--gcs flag)
 │
 ├── neuralop_mlx/                # MLX FNO implementation (Apple Silicon)
 │   ├── models/fno.py            # FNO model (N-dimensional)
@@ -63,9 +65,14 @@ FNO4d/
 ### One-shot install
 
 ```bash
-bash install.sh           # default: always creates/reuses venv/
-bash install.sh --conda   # opt-in: install into active named conda env
+bash install.sh                 # default: always creates/reuses venv/
+bash install.sh --conda         # opt-in: install into active named conda env
+bash install.sh --s3            # + AWS S3 / S3-compatible storage (s3fs, boto3)
+bash install.sh --gcs           # + Google Cloud Storage (gcsfs, google-cloud-storage)
+bash install.sh --s3 --gcs      # + both cloud backends
 ```
+
+Flags compose freely, e.g. `bash install.sh --conda --s3 --gcs`.
 
 #### Environment modes
 
@@ -73,6 +80,8 @@ bash install.sh --conda   # opt-in: install into active named conda env
 |---|---|
 | `bash install.sh` | Creates (or reuses) `venv/` in the repo root with `--system-site-packages`. Works in a bare shell, inside a conda env, or in a Docker container — packages already installed in the parent Python are visible without reinstalling. |
 | `bash install.sh --conda` | Installs directly into the **currently active named conda env** (no venv created). Refused if the active env is `base` or no conda env is active. |
+| `bash install.sh --s3` | Also installs `requirements-s3.txt`: `s3fs` + `boto3` for S3/S3-compatible access. |
+| `bash install.sh --gcs` | Also installs `requirements-gcs.txt`: `gcsfs` + `google-cloud-storage` for GCS access. |
 
 > **conda base:** the `base` env is never modified directly. With `bash install.sh`
 > a venv is created that inherits base's packages via `--system-site-packages`.
@@ -169,6 +178,10 @@ pip install -e ./neuraloperator-4d-2.0.0
 
 # Mac only
 pip install -e .          # installs neuralop_mlx from repo root
+
+# Cloud storage (either platform, opt-in)
+pip install -r requirements-s3.txt   # S3 / S3-compatible (s3fs, boto3)
+pip install -r requirements-gcs.txt  # Google Cloud Storage
 ```
 
 > **Important (Mac / neuralop\_mlx):** always run `pip install -e .` from the
@@ -192,8 +205,16 @@ python -c "from loc_libs.read_3d_root import read_3d_data; print('loc_libs OK')"
 
 ## Cloud storage
 
-`read_3d_root.py` and `read_3d_hdf5.py` accept a `storage_options` dict that
-is forwarded directly to `uproot`, enabling transparent remote I/O via fsspec.
+Cloud storage backends are **opt-in** — install them with `--s3` / `--gcs` flags
+or the corresponding requirements files:
+
+| Backend | Install flag | Requirements file | Packages |
+|---|---|---|---|
+| AWS S3 / S3-compatible | `--s3` | `requirements-s3.txt` | `s3fs`, `boto3` |
+| Google Cloud Storage | `--gcs` | `requirements-gcs.txt` | `gcsfs`, `google-cloud-storage` |
+
+Once installed, `read_3d_root.py` and `read_3d_hdf5.py` accept a `storage_options`
+dict forwarded directly to `uproot`, enabling transparent remote I/O via fsspec.
 
 ```python
 from loc_libs.read_3d_root import read_3d_data
@@ -213,7 +234,8 @@ data = read_3d_data(
 ```
 
 The packages `s3fs`, `boto3`, `gcsfs`, and `google-cloud-storage` are
-included in `requirements-base.txt` and installed on both platforms.
+installed only when the corresponding `--s3` / `--gcs` flag is passed to
+`install.sh` (or the matching requirements file is installed manually).
 
 ---
 

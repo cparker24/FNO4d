@@ -31,19 +31,10 @@ configmypy
 # jupyter         # uncomment if not provided by container / base environment
 # jupyterlab      # uncomment if not provided by container / base environment
 
-# Cloud storage — AWS S3-compatible and Google Cloud Storage
-# uproot passes storage_options directly to fsspec, so these drivers
-# enable s3:// and gs:// paths in read_3d_root.py / read_3d_hdf5.py.
-#
-# No version pins here — install.sh freezes the current environment as a pip
-# constraints file before running pip install, so whatever fsspec/botocore version
-# is already present (e.g. in a conda base env) is respected automatically.
-# boto3 backtracking is avoided because botocore is already locked in the env;
-# in a fresh environment install.sh installs s3fs first to lock botocore before boto3.
-s3fs                 # fsspec driver for S3-compatible services (Lambda, MinIO, …)
-gcsfs                # fsspec driver for Google Cloud Storage
-google-cloud-storage # direct GCS Python API
-boto3                # direct AWS API (botocore version constrained by s3fs→aiobotocore)
-#boto3             # direct AWS S3 Python API
-#gcsfs             # fsspec driver for Google Cloud Storage
-#google-cloud-storage  # direct GCS Python API
+# Cloud storage — opt-in via install.sh flags or separate requirements files
+# Use: bash install.sh --s3        → installs requirements-s3.txt
+#      bash install.sh --gcs       → installs requirements-gcs.txt
+#      bash install.sh --s3 --gcs  → both
+# Or manually: pip install -r requirements-s3.txt / requirements-gcs.txt
+# Both backends use uproot's storage_options to access s3:// and gs:// URIs
+# in loc_libs/read_3d_root.py and read_3d_hdf5.py.

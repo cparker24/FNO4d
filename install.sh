@@ -7,10 +7,15 @@
 # reinstalling them.
 #
 # Usage:
-#   bash install.sh            # always creates/reuses venv/ (default)
-#   bash install.sh --conda    # install directly into the active non-base
-#                              # conda env instead of creating a venv
+#   bash install.sh                 # base + platform deps only (no cloud storage)
+#   bash install.sh --s3            # + AWS S3 / S3-compatible (s3fs, boto3)
+#   bash install.sh --gcs           # + Google Cloud Storage (gcsfs, google-cloud-storage)
+#   bash install.sh --s3 --gcs      # + both cloud backends
+#   bash install.sh --conda         # install into active non-base conda env (no venv)
 #
+# Cloud flags install requirements-s3.txt / requirements-gcs.txt on top of base.
+# The fsspec family (s3fs, gcsfs, fsspec) is pinned to match any version already
+# present in the environment to avoid conflicts with datasets/lightning.
 # The --conda flag is useful when you want packages registered in the conda
 # env itself (e.g. for conda-managed torch builds). It is refused if the
 # active env is 'base'.
@@ -26,11 +31,38 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
 # ── parse flags ───────────────────────────────────────────────────────────────
+usage() {
+    cat <<EOF
+Usage: bash install.sh [OPTIONS]
+
+Options:
+  --s3      Install S3 / S3-compatible storage backend (s3fs, boto3).
+            Enables s3:// URIs in read_3d_root.py / read_3d_hdf5.py.
+  --gcs     Install Google Cloud Storage backend (gcsfs, google-cloud-storage).
+            Enables gs:// URIs in read_3d_root.py / read_3d_hdf5.py.
+  --conda   Install into the currently active named conda env instead of
+            creating a venv.  Refused if the active env is 'base'.
+  -h, --help  Show this help message and exit.
+
+Flags may be combined freely, e.g.:
+  bash install.sh --s3 --gcs
+  bash install.sh --conda --s3
+
+Default (no flags): creates/reuses venv/ with --system-site-packages,
+installs base + platform deps only (no cloud storage).
+EOF
+}
+
 USE_CONDA_FLAG=false
+INSTALL_S3=false
+INSTALL_GCS=false
 for arg in "$@"; do
     case "$arg" in
-        --conda) USE_CONDA_FLAG=true ;;
-        *) die "Unknown argument: $arg  (usage: bash install.sh [--conda])" ;;
+        --conda)       USE_CONDA_FLAG=true ;;
+        --s3)          INSTALL_S3=true ;;
+        --gcs)         INSTALL_GCS=true ;;
+        -h|--help)     usage; exit 0 ;;
+        *) die "Unknown argument: $arg  (run 'bash install.sh --help' for usage)" ;;
     esac
 done
 
@@ -155,41 +187,67 @@ install_torch_linux() {
     $PIP install torch-harmonics
 }
 
-# ── pin s3fs/gcsfs to match any existing fsspec in the environment ────────────
-# s3fs, gcsfs, and fsspec all share the same version number (fsspec org releases
-# them in sync).  If fsspec is already installed (e.g. from conda or the system
-# site-packages), pre-install s3fs and gcsfs at that exact version.  Then write
-# a small constraints file with those three pins so the main requirements install
-# cannot upgrade them and pull in a newer conflicting fsspec.
-# Pre-installing s3fs also locks aiobotocore+botocore before boto3 arrives,
-# eliminating the boto3 backtracking problem.
-_CLOUD_CONSTRAINTS=$(mktemp /tmp/fno4d_cloud.XXXXXX)
-_FSSPEC_VER=$(python3 -c "import fsspec; print(fsspec.__version__)" 2>/dev/null || true)
-if [[ -n "$_FSSPEC_VER" ]]; then
-    log "Existing fsspec $_FSSPEC_VER detected — pre-installing s3fs==$_FSSPEC_VER gcsfs==$_FSSPEC_VER ..."
-    $PIP install "s3fs==$_FSSPEC_VER" "gcsfs==$_FSSPEC_VER"
-    # capture the resolved versions into a constraints file
-    printf "fsspec==%s\ns3fs==%s\ngcsfs==%s\n" "$_FSSPEC_VER" "$_FSSPEC_VER" "$_FSSPEC_VER" > "$_CLOUD_CONSTRAINTS"
-else
-    log "No existing fsspec — pre-installing s3fs/gcsfs (latest) to lock botocore before boto3 ..."
-    $PIP install s3fs gcsfs
-    # capture whatever got installed so the main install can't change them
-    python3 -c "import fsspec, s3fs, gcsfs; print('fsspec=='+fsspec.__version__); print('s3fs=='+s3fs.__version__); print('gcsfs=='+gcsfs.__version__)" > "$_CLOUD_CONSTRAINTS" 2>/dev/null || true
-fi
-log "Cloud constraints: $(cat "$_CLOUD_CONSTRAINTS" | tr '\n' ' ')"
-
 # ── main install ──────────────────────────────────────────────────────────────
 if [[ "$PLATFORM" == "mac" ]]; then
     log "Installing Mac Silicon requirements (torch + mlx + base) ..."
-    $PIP install -r "$REPO_ROOT/requirements-mac.txt" -c "$_CLOUD_CONSTRAINTS"
+    $PIP install -r "$REPO_ROOT/requirements-mac.txt"
 
 elif [[ "$PLATFORM" == "linux" ]]; then
     install_torch_linux
     log "Installing Linux base requirements ..."
-    $PIP install -r "$REPO_ROOT/requirements-linux.txt" -c "$_CLOUD_CONSTRAINTS"
+    $PIP install -r "$REPO_ROOT/requirements-linux.txt"
 fi
 
-rm -f "$_CLOUD_CONSTRAINTS"
+# ── cloud storage (opt-in) ────────────────────────────────────────────────────
+# s3fs, gcsfs, and fsspec are released in sync (same version numbers).  If
+# fsspec is already present in the environment, pin the fsspec-family packages
+# to that version so pip cannot upgrade fsspec past the existing ceiling (which
+# would break datasets/lightning already in the env).  Pre-installing the fsspec
+# driver also locks aiobotocore+botocore before boto3 arrives, which eliminates
+# the boto3 backtracking problem on a fresh environment.
+if [[ "$INSTALL_S3" == true || "$INSTALL_GCS" == true ]]; then
+    _CLOUD_CONSTRAINTS=$(mktemp /tmp/fno4d_cloud.XXXXXX)
+    _FSSPEC_VER=$(python3 -c "import fsspec; print(fsspec.__version__)" 2>/dev/null || true)
+
+    if [[ -n "$_FSSPEC_VER" ]]; then
+        log "Existing fsspec $_FSSPEC_VER detected — will pin fsspec family to this version."
+        printf 'fsspec==%s\n' "$_FSSPEC_VER" > "$_CLOUD_CONSTRAINTS"
+        [[ "$INSTALL_S3"  == true ]] && printf 's3fs==%s\n'  "$_FSSPEC_VER" >> "$_CLOUD_CONSTRAINTS"
+        [[ "$INSTALL_GCS" == true ]] && printf 'gcsfs==%s\n' "$_FSSPEC_VER" >> "$_CLOUD_CONSTRAINTS"
+    else
+        # No existing fsspec — pre-install the driver(s) first to lock botocore
+        # before boto3 arrives, then record the resolved version as a constraint.
+        [[ "$INSTALL_S3"  == true ]] && $PIP install s3fs
+        [[ "$INSTALL_GCS" == true ]] && $PIP install gcsfs
+        python3 -c "
+import sys
+try:
+    import fsspec; print('fsspec=='+fsspec.__version__)
+except ImportError: pass
+try:
+    import s3fs;   print('s3fs=='+s3fs.__version__)
+except ImportError: pass
+try:
+    import gcsfs;  print('gcsfs=='+gcsfs.__version__)
+except ImportError: pass
+" > "$_CLOUD_CONSTRAINTS" 2>/dev/null || true
+    fi
+
+    log "Cloud constraints: $(tr '\n' ' ' < "$_CLOUD_CONSTRAINTS")"
+
+    if [[ "$INSTALL_S3" == true ]]; then
+        log "Installing S3 storage requirements (requirements-s3.txt) ..."
+        $PIP install -r "$REPO_ROOT/requirements-s3.txt" -c "$_CLOUD_CONSTRAINTS"
+    fi
+    if [[ "$INSTALL_GCS" == true ]]; then
+        log "Installing GCS storage requirements (requirements-gcs.txt) ..."
+        $PIP install -r "$REPO_ROOT/requirements-gcs.txt" -c "$_CLOUD_CONSTRAINTS"
+    fi
+
+    rm -f "$_CLOUD_CONSTRAINTS"
+else
+    log "Cloud storage not requested. Re-run with --s3 and/or --gcs to add cloud backends."
+fi
 
 # ── local editable installs (both platforms) ──────────────────────────────────
 log "Installing loc_libs (editable) ..."
