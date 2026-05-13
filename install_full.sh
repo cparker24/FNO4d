@@ -308,11 +308,15 @@ install_torch_linux() {
             _TORCH_SPEC="$_SPEC_PLAIN"; _found=true
             log "  → using ${_SPEC_PLAIN} (custom index)"
         elif [[ "$WHEEL_TAG" == "cpu" ]]; then
-            # CPU-only: the custom index may lag PyPI — try PyPI as well.
-            log "  Not found on custom index — checking PyPI ..."
+            # CPU-only: the Linux custom index caps at 2.6.0+cpu for x86_64.
+            # Newer versions exist on PyPI but bundle CUDA 13 runtime packages on Linux.
+            log "  Not found on custom CPU index (Linux caps at 2.6.0) — checking PyPI ..."
             if $PIP install --dry-run --quiet "${_SPEC_PLAIN}" &>/dev/null; then
                 _TORCH_SPEC="$_SPEC_PLAIN"; _found=true; _USE_PYPI=true
-                log "  → using ${_SPEC_PLAIN} (PyPI)"
+                warn "torch==${TORCH_VERSION} from PyPI bundles CUDA 13 runtime packages on Linux (~3 GB extra)."
+                warn "CPU operations will still work; torch.cuda.is_available() returns False without a GPU."
+                warn "For a lean CPU-only install, use --torch 2.6.0 (last CPU-only wheel for Linux)."
+                log "  → using ${_SPEC_PLAIN} (PyPI; includes CUDA runtime packages on Linux)"
             fi
         fi
 
@@ -326,14 +330,17 @@ install_torch_linux() {
                 | tr ',' '\n' \
                 | sed 's/[[:space:]]//g; /^$/d; s/Availableversions://g' >&2 || true
             if [[ "$WHEEL_TAG" == "cpu" ]]; then
-                warn "Also available on PyPI:"
+                warn "Note: Linux CPU wheels cap at 2.6.0 on the custom index."
+                warn "      Versions 2.7.0+ on PyPI bundle CUDA 13 packages on Linux and"
+                warn "      may require glibc >= 2.34 (Alma/RHEL 9, Ubuntu 22.04+) to install."
+                warn "Also available on PyPI (>= 2.7.0 on Linux includes CUDA packages):"
                 $PIP index versions torch 2>&1 \
                     | grep -i "Available versions" \
                     | sed 's/+[a-zA-Z0-9]*//g' \
                     | tr ',' '\n' \
                     | sed 's/[[:space:]]//g; /^$/d; s/Availableversions://g' >&2 || true
             fi
-            die "Choose a valid version from the lists above and re-run with --torch <version>."
+            die "Choose a valid version from the lists above and re-run with --torch <version>." 
         fi
     fi
     log "Installing ${_TORCH_SPEC} + torchvision ..."
