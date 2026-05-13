@@ -158,28 +158,38 @@ install_torch_linux() {
 # ── pin s3fs/gcsfs to match any existing fsspec in the environment ────────────
 # s3fs, gcsfs, and fsspec all share the same version number (fsspec org releases
 # them in sync).  If fsspec is already installed (e.g. from conda or the system
-# site-packages), install s3fs and gcsfs at that exact version so they don't
-# trigger a conflicting fsspec upgrade.  This also pre-installs aiobotocore and
-# locks botocore before boto3 arrives, eliminating the boto3 backtracking problem.
+# site-packages), pre-install s3fs and gcsfs at that exact version.  Then write
+# a small constraints file with those three pins so the main requirements install
+# cannot upgrade them and pull in a newer conflicting fsspec.
+# Pre-installing s3fs also locks aiobotocore+botocore before boto3 arrives,
+# eliminating the boto3 backtracking problem.
+_CLOUD_CONSTRAINTS=$(mktemp /tmp/fno4d_cloud.XXXXXX)
 _FSSPEC_VER=$(python3 -c "import fsspec; print(fsspec.__version__)" 2>/dev/null || true)
 if [[ -n "$_FSSPEC_VER" ]]; then
     log "Existing fsspec $_FSSPEC_VER detected — pre-installing s3fs==$_FSSPEC_VER gcsfs==$_FSSPEC_VER ..."
     $PIP install "s3fs==$_FSSPEC_VER" "gcsfs==$_FSSPEC_VER"
+    # capture the resolved versions into a constraints file
+    printf "fsspec==%s\ns3fs==%s\ngcsfs==%s\n" "$_FSSPEC_VER" "$_FSSPEC_VER" "$_FSSPEC_VER" > "$_CLOUD_CONSTRAINTS"
 else
     log "No existing fsspec — pre-installing s3fs/gcsfs (latest) to lock botocore before boto3 ..."
     $PIP install s3fs gcsfs
+    # capture whatever got installed so the main install can't change them
+    python3 -c "import fsspec, s3fs, gcsfs; print('fsspec=='+fsspec.__version__); print('s3fs=='+s3fs.__version__); print('gcsfs=='+gcsfs.__version__)" > "$_CLOUD_CONSTRAINTS" 2>/dev/null || true
 fi
+log "Cloud constraints: $(cat "$_CLOUD_CONSTRAINTS" | tr '\n' ' ')"
 
 # ── main install ──────────────────────────────────────────────────────────────
 if [[ "$PLATFORM" == "mac" ]]; then
     log "Installing Mac Silicon requirements (torch + mlx + base) ..."
-    $PIP install -r "$REPO_ROOT/requirements-mac.txt"
+    $PIP install -r "$REPO_ROOT/requirements-mac.txt" -c "$_CLOUD_CONSTRAINTS"
 
 elif [[ "$PLATFORM" == "linux" ]]; then
     install_torch_linux
     log "Installing Linux base requirements ..."
-    $PIP install -r "$REPO_ROOT/requirements-linux.txt"
+    $PIP install -r "$REPO_ROOT/requirements-linux.txt" -c "$_CLOUD_CONSTRAINTS"
 fi
+
+rm -f "$_CLOUD_CONSTRAINTS"
 
 # ── local editable installs (both platforms) ──────────────────────────────────
 log "Installing loc_libs (editable) ..."
