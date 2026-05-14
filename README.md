@@ -17,6 +17,7 @@ Two parallel training stacks are provided:
 
 ```
 FNO4d/
+├── README_train.md              # PyTorch training script — parameters, data format, outputs
 ├── install.sh                   # install into current env (inherits system packages)
 ├── install_full.sh              # create a fresh isolated env (conda or virtualenv)
 ├── install_kernel.sh            # register active env as a Jupyter kernel
@@ -427,6 +428,9 @@ train_ratio = 0.8
 ```
 
 ### PyTorch path (Linux / Lambda)
+
+See [README_train.md](README_train.md) for a full description of parameters,
+input format, output files, and the `loc_libs` helpers used.
 
 ```bash
 cd train
