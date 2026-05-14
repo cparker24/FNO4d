@@ -32,6 +32,7 @@ class Trainer:
         mixed_precision: bool = False,
         wandb_log: bool = False,
         use_distributed: bool = False,
+        log_fn=None,
     ):
         self.model = model
         self.n_epochs = n_epochs
@@ -39,11 +40,12 @@ class Trainer:
         self.eval_interval = eval_interval
         self.verbose = verbose
         self.mixed_precision = mixed_precision
+        self.log_fn = log_fn if log_fn is not None else print
         # wandb and distributed are accepted but not implemented
         if wandb_log:
-            print("[Trainer] wandb_log=True is not supported in MLX trainer, ignoring.")
+            self.log_fn("[Trainer] wandb_log=True is not supported in MLX trainer, ignoring.")
         if use_distributed:
-            print("[Trainer] use_distributed=True is not supported in MLX trainer, ignoring.")
+            self.log_fn("[Trainer] use_distributed=True is not supported in MLX trainer, ignoring.")
 
     # ------------------------------------------------------------------
     # Public API (matches neuralop Trainer.train)
@@ -83,10 +85,7 @@ class Trainer:
             epoch_time = time.perf_counter() - t0
 
             if self.verbose:
-                print(
-                    f"Epoch {epoch:4d} | train_err={train_err:.6f} | "
-                    f"avg_loss={avg_loss:.6f} | time={epoch_time:.2f}s"
-                )
+                self.log_training(epoch, epoch_time, avg_loss, train_err)
 
             epoch_metrics = {"train_err": train_err, "avg_loss": avg_loss}
 
@@ -95,8 +94,7 @@ class Trainer:
                 epoch_metrics.update(eval_metrics)
 
                 if self.verbose:
-                    metrics_str = " | ".join(f"{k}={v:.6f}" for k, v in eval_metrics.items())
-                    print(f"         eval: {metrics_str}")
+                    self.log_eval(epoch, eval_metrics)
 
                 if save_best is not None:
                     metric_val = eval_metrics.get(save_best, None)
@@ -110,9 +108,25 @@ class Trainer:
                         best_metric = metric_val
                         self.checkpoint(save_dir, name="best_model")
                         if self.verbose:
-                            print(f"         Saved best model (metric={best_metric:.6f})")
+                            self.log_fn(f"         Saved best model (metric={best_metric:.6f})")
 
         return epoch_metrics
+
+    # ------------------------------------------------------------------
+    # Logging (mirrors the PyTorch neuralop Trainer interface so that
+    # patch_trainer_logging works identically for both frameworks)
+    # ------------------------------------------------------------------
+
+    def log_training(self, epoch, time, avg_loss, train_err,
+                     avg_lasso_loss=None, lr=None):
+        self.log_fn(
+            f"Epoch {epoch:4d} | train_err={train_err:.6f} | "
+            f"avg_loss={avg_loss:.6f} | time={time:.2f}s"
+        )
+
+    def log_eval(self, epoch, eval_metrics):
+        metrics_str = " | ".join(f"{k}={v:.6f}" for k, v in eval_metrics.items())
+        self.log_fn(f"         eval: {metrics_str}")
 
     # ------------------------------------------------------------------
     # Checkpointing

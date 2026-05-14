@@ -3,6 +3,43 @@ import sys
 import atexit
 
 
+class RunLog:
+    """Print to stdout and, if path is given, mirror every line to a log file.
+
+    With path=None this is a plain print wrapper — no file I/O, no stdout
+    patching, normal terminal behaviour.
+
+    Usage::
+
+        log = RunLog(f'{odir}/training.log')   # log to file + terminal
+        log = RunLog()                          # terminal only
+
+        log('some message')
+        log(f'value = {x}')
+        log.close()   # optional — also called automatically at exit
+    """
+
+    def __init__(self, path=None):
+        self._f = open(path, 'w') if path else None
+        if self._f:
+            atexit.register(self.close)
+
+    def __call__(self, *args, **kwargs):
+        print(*args, **kwargs)
+        if self._f:
+            # mirror the same formatted string to the file
+            import io
+            buf = io.StringIO()
+            print(*args, **kwargs, file=buf)
+            self._f.write(buf.getvalue())
+            self._f.flush()
+
+    def close(self):
+        if self._f:
+            self._f.close()
+            self._f = None
+
+
 class Logger:
     """Tee stdout to a file while keeping console output."""
 
@@ -28,6 +65,48 @@ def enable_log_tee(log_path):
         sys.stdout = sys.stdout.terminal
 
     atexit.register(_restore)
+
+
+def patch_trainer_logging(trainer, log_fn, history=None):
+    """Route trainer verbose output (train + eval metrics) through log_fn
+    and optionally collect structured metrics into a TrainingHistory.
+
+    Works with both the MLX Trainer (also sets trainer.log_fn) and the
+    PyTorch neuralop Trainer (patches log_training and log_eval methods).
+
+    Parameters
+    ----------
+    trainer   : Trainer instance
+    log_fn    : callable — e.g. a RunLog instance
+    history   : TrainingHistory, optional — receives record_train/record_eval calls
+    """
+    import types
+
+    # MLX Trainer: also update log_fn for messages outside log_training/log_eval
+    if hasattr(trainer, 'log_fn'):
+        trainer.log_fn = log_fn
+
+    def _log_training(self, epoch, time, avg_loss, train_err,
+                      avg_lasso_loss=None, lr=None):
+        msg = f"[{epoch}] time={time:.2f}, avg_loss={avg_loss:.4f}, train_err={train_err:.4f}"
+        if avg_lasso_loss is not None:
+            msg += f", avg_lasso={avg_lasso_loss:.4f}"
+        log_fn(msg)
+        if history is not None:
+            history.record_train(epoch, time=time, avg_loss=avg_loss,
+                                 train_err=train_err, avg_lasso_loss=avg_lasso_loss)
+
+    def _log_eval(self, epoch, eval_metrics):
+        parts = [
+            f"{k}={float(v):.4f}" for k, v in eval_metrics.items()
+            if isinstance(v, float) or hasattr(v, 'item')
+        ]
+        log_fn("Eval: " + ", ".join(parts))
+        if history is not None:
+            history.record_eval(epoch, eval_metrics)
+
+    trainer.log_training = types.MethodType(_log_training, trainer)
+    trainer.log_eval = types.MethodType(_log_eval, trainer)
 
 
 def patch_trainer_checkpoint(trainer, trainer_cls, checkpoint_freq, odir):

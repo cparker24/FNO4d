@@ -1,6 +1,5 @@
 import os
 import psutil
-from neuralop.utils import count_model_params
 
 
 def process_memory():
@@ -33,8 +32,16 @@ class MemoryPrinter:
         print(output)
 
 
-def calculate_model_memory(model):
-    """Return model memory footprint in MB assuming float32 parameters."""
-    total_params = count_model_params(model)
+def calculate_model_memory(model, count_fn=None):
+    """Return model memory footprint in MB assuming float32 parameters.
+
+    count_fn : callable(model) -> int, optional.
+        Defaults to neuralop.utils.count_model_params (PyTorch).
+        Pass neuralop_mlx.utils.count_model_params for MLX models.
+    """
+    if count_fn is None:
+        from neuralop.utils import count_model_params
+        count_fn = count_model_params
+    total_params = count_fn(model)
     print(f'Total parameters: {total_params}')
     return (total_params * 4) / (1024 ** 2)  # float32 bytes → MB

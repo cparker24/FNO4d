@@ -39,54 +39,54 @@ from neuralop import LpLoss, H1Loss
 
 sys.path.append('../loc_libs')
 from read_3d_root import read_3d_data
-from parse_training_log import plot_training_log
 from datasets import FluidDataset
 from memory_utils import calculate_model_memory
-from training_utils import enable_log_tee, patch_trainer_checkpoint
+from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint
+from parse_training_log import TrainingHistory
+
+log = RunLog(f'{odir}/training.log' if log_directly else None)
 
 t0 = perf_counter()
 
 # ---------------------------------------------------------------------------
-# log file
+# configuration summary
 # ---------------------------------------------------------------------------
-log = open(f'{odir}/log.log', 'w')
-log.write(f'input dir: {input_dir}\n')
-log.write(f'input files: {input_files}\n')
-log.write(f'n_epochs: {n_epochs}\n')
-log.write(f'batch_size: {batch_size}\n')
-log.write(f'hidden_channels: {hidden_channels}\n')
-log.write(f'checkpoint_freq: {checkpoint_freq}\n')
-log.write(f'n_modes: {n_modes}\n')
-log.write(f'train_ratio: {train_ratio}\n')
-log.write(f'xyslice: {xyslice}\n')
-log.write(f'tauslice: {tauslice}\n')
-log.write(f'log_directly: {log_directly}\n')
-log.write(f'cpu_model_forward: {log_directly}\n')
-log.write(f'nevents(in): {nevents_in}\n')
-log.write(f'AdamW: lr: {lr}\n')
-log.write(f'AdamW: weight_decay: {weight_decay}\n')
+log(f'input dir: {input_dir}')
+log(f'input files: {input_files}')
+log(f'n_epochs: {n_epochs}')
+log(f'batch_size: {batch_size}')
+log(f'hidden_channels: {hidden_channels}')
+log(f'checkpoint_freq: {checkpoint_freq}')
+log(f'n_modes: {n_modes}')
+log(f'train_ratio: {train_ratio}')
+log(f'xyslice: {xyslice}')
+log(f'tauslice: {tauslice}')
+log(f'log_directly: {log_directly}')
+log(f'nevents(in): {nevents_in}')
+log(f'AdamW: lr: {lr}')
+log(f'AdamW: weight_decay: {weight_decay}')
 
 # ---------------------------------------------------------------------------
 # load data
 # ---------------------------------------------------------------------------
-print(f'Events called for {nevents_in}')
+log(f'Events called for {nevents_in}')
 
 arr_data = [read_3d_data(f'{input_dir}/{f}', nevents=nevents_in, local_rank=None) for f in input_files]
 
 if len(arr_data) == 0:
     raise ValueError("No data found in the specified input files.")
 
-log.write('Data parameters from {first_file}:\n')
+log('Data parameters from input file:')
 for key in arr_data[0].keys():
     if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
-        log.write(f'  {key}: {arr_data[0][key]}\n')
+        log(f'  {key}: {arr_data[0][key]}')
 
 arr = arr_data[0]['arr']
 arr = arr[:, :, xyslice, xyslice, tauslice, :]
 del arr_data
 gc.collect()
 
-log.write(f'nevents (constrained by input file): {arr.shape[0]}')
+log(f'nevents (constrained by input file): {arr.shape[0]}')
 
 n_train = int(arr.shape[0] * train_ratio)
 data_train = arr[:n_train]
@@ -95,13 +95,11 @@ data_verify = arr[n_train:]
 np.random.shuffle(data_train)
 np.random.shuffle(data_verify)
 
-print('shapes train: ', data_train.shape)
-print('shapes verify: ', data_verify.shape)
-log.write(f'data_train shape: {data_train.shape}\n')
-log.write(f'data_verify shape: {data_verify.shape}\n')
+log(f'shapes train:  {data_train.shape}')
+log(f'shapes verify: {data_verify.shape}')
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-print(f'Using device: {device}')
+log(f'Using device: {device}')
 
 # ---------------------------------------------------------------------------
 # datasets and loaders
@@ -115,7 +113,7 @@ test_resolutions = [100]
 test_batch_sizes = [10]
 test_loaders = {}
 for res, test_bsize in zip(test_resolutions, test_batch_sizes):
-    print("res", res)
+    log(f'res {res}')
     test_loaders[res] = DataLoader(dataset_test,
                                    batch_size=test_bsize,
                                    shuffle=False,
@@ -136,9 +134,7 @@ model = FNO(
 ).to(device)
 
 memory_usage = calculate_model_memory(model)
-print(f"Model memory usage: {memory_usage:.2f} MB")
-log.write(f"Model memory usage: {memory_usage:.2f} MB\n")
-log.close()
+log(f"Model memory usage: {memory_usage:.2f} MB")
 
 # ---------------------------------------------------------------------------
 # optimizer, losses, trainer
@@ -158,11 +154,11 @@ trainer = Trainer(model=model, n_epochs=n_epochs,
                   use_distributed=False,
                   verbose=True)
 
+history = TrainingHistory()
+patch_trainer_logging(trainer, log, history=history)
+
 if checkpoint_freq is not None and checkpoint_freq > 0:
     patch_trainer_checkpoint(trainer, Trainer, checkpoint_freq, odir)
-
-if log_directly:
-    enable_log_tee(f'{odir}/training.log')
 
 # ---------------------------------------------------------------------------
 # train
@@ -176,3 +172,8 @@ trainer.train(train_loader=train_loader,
               save_best='100_l2',
               training_loss=train_loss,
               eval_losses=eval_losses)
+
+history.save(f'{odir}/metrics.json')
+history.plot(save_path=f'{odir}/training_curves.svg', title='FNO Training')
+log(f'metrics   → {odir}/metrics.json')
+log(f'curves    → {odir}/training_curves.svg')
