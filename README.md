@@ -19,6 +19,7 @@ Two parallel training stacks are provided:
 FNO4d/
 ├── install.sh                   # install into current env (inherits system packages)
 ├── install_full.sh              # create a fresh isolated env (conda or virtualenv)
+├── install_kernel.sh            # register active env as a Jupyter kernel
 ├── requirements-base.txt        # shared deps (both platforms)
 ├── requirements-mac.txt         # Mac Silicon: adds torch + mlx
 ├── requirements-linux.txt       # Linux/Lambda: adds nothing (torch auto-detected)
@@ -138,6 +139,44 @@ source venv_fno4d/bin/activate   # or whatever name you chose
 
 # conda
 conda activate fno4d             # or whatever name you chose
+```
+
+#### Register as a Jupyter kernel
+
+After activating the environment, run `install_kernel.sh` to register it as a
+Jupyter kernel so it appears in JupyterLab / Jupyter Notebook:
+
+```bash
+bash install_kernel.sh
+```
+
+The kernel name is derived automatically from environment variables:
+
+| Active environment | Name source |
+|---|---|
+| `conda activate fno4d` | `$CONDA_DEFAULT_ENV` → `fno4d` |
+| `source venv_fno4d/bin/activate` | `basename $VIRTUAL_ENV` → `venv_fno4d` |
+
+Both the name and the display label can be overridden:
+
+```bash
+# Override the kernel identifier (used internally by Jupyter)
+KERNEL_NAME=fno4d_cu124 bash install_kernel.sh
+
+# Override the display name shown in the Jupyter UI
+KERNEL_DISPLAY_NAME="FNO4d CUDA 12.4" bash install_kernel.sh
+
+# Override both
+KERNEL_NAME=fno4d_cu124 KERNEL_DISPLAY_NAME="FNO4d CUDA 12.4" bash install_kernel.sh
+```
+
+The script installs `ipykernel` automatically if it is not already present and
+registers the kernel for the current user (`--user`), so it is visible
+regardless of how Jupyter was launched.
+
+```bash
+jupyter kernelspec list              # verify the kernel was registered
+jupyter kernelspec remove fno4d     # remove it later if needed
 ```
 
 ---
