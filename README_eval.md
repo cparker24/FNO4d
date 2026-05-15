@@ -17,6 +17,22 @@ side-by-side.
 
 ---
 
+## Installing marimo (optional)
+
+Marimo is not installed by the base `install.sh` so that headless or batch
+setups are not forced to carry the dependency.  If you want the interactive
+notebook UI, run the helper script **after** activating the FNO4d environment:
+
+```bash
+source venv/bin/activate          # or: conda activate <env>
+bash install_marimo.sh
+```
+
+The script is idempotent: it skips the install if marimo is already present and
+prints the resolved binary path on success.
+
+---
+
 ## Quick start
 
 Run as an interactive notebook (recommended):
