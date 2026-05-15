@@ -19,11 +19,16 @@ Two parallel training stacks are provided:
 FNO4d/
 ├── README_train.md              # PyTorch training script — parameters, data format, outputs
 ├── README_eval.md               # evaluation / inference scripts — UI controls, outputs, examples
+├── README_eval_metric.md        # ModelEval metric suite — math, diagnostics, API reference
+├── README_mlx.md                # MLX port overview — setup, differences from PyTorch stack
+├── PORTING_NOTES.md             # technical notes for continuing the neuralop → MLX port
 ├── install.sh                   # install into current env (inherits system packages)
 ├── install_full.sh              # create a fresh isolated env (conda or virtualenv)
 ├── install_kernel.sh            # register active env as a Jupyter kernel
+├── install_marimo.sh            # install marimo into the active env (optional)
 ├── check_install.sh             # pre-flight checks for install.sh (mirrors its probes)
 ├── check_install_full.sh        # pre-flight checks for install_full.sh
+├── setup_nbstripout.sh          # install nbstripout and register git filter for notebooks
 ├── requirements-base.txt        # shared deps (both platforms)
 ├── requirements-mac.txt         # Mac Silicon: adds torch + mlx
 ├── requirements-linux.txt       # Linux/Lambda: adds nothing (torch auto-detected)
@@ -34,21 +39,36 @@ FNO4d/
 │   ├── models/fno.py            # FNO model (N-dimensional)
 │   ├── layers/                  # spectral conv, channel MLP, embeddings, …
 │   ├── training/                # Trainer, AdamW, LpLoss, H1Loss
-│   └── weight_transfer.py       # load_from_torch() — PyTorch → MLX migration
+│   └── weight_transfer.py       # load_from_torch() — PyTorch → MLX weight migration
 │
 ├── neuraloperator-4d-2.0.0/     # PyTorch neuraloperator (local 4D fork)
+│
+├── tests/                       # MLX unit and integration tests
+│   ├── test_fno_model_mlx.py    # forward-pass shape and output checks for MLX FNO
+│   ├── test_layers_mlx.py       # spectral conv, channel MLP, embedding layer tests
+│   ├── test_training_mlx.py     # one-step training loop smoke test (MLX)
+│   ├── test_weight_transfer.py  # PyTorch → MLX weight transfer correctness
+│   └── test_compare_torch_mlx.py # numerical parity check: PyTorch vs MLX outputs
 │
 ├── loc_libs/                    # local helper library (data I/O, normalisation, utilities)
 │   ├── read_3d_root.py          # read events from ROOT files (local or cloud)
 │   ├── read_3d_hdf5.py          # ROOT → HDF5 conversion + streaming reads
 │   ├── root_pytorch_loader.py   # IterableDataset for large ROOT files
-│   ├── parse_training_log.py    # parse and plot training logs
-│   ├── skinnycontour.py         # contour utilities
+│   ├── datasets.py              # in-memory PyTorch Dataset classes
+│   ├── training_utils.py        # RunLog and shared training helpers
+│   ├── parse_training_log.py    # parse and plot training-loss logs
+│   ├── memory_utils.py          # memory profiling utilities
 │   ├── NormFn3d.py              # physics-motivated normalisation functions and inverses
+│   ├── NormFn.py                # older 3-channel normalizers (pre-NormFn3d, backward compat)
+│   ├── README_NormFn3d.md       # extended docs for the NormFn3d normalizer family
 │   ├── norm_utils.py            # stateful Normalizer wrapper (fit/transform/inverse/save/load)
+│   ├── skinnycontour.py         # skinny-contour CDF overlay utilities
+│   ├── cont.py                  # low-level contour mask helpers (backend for skinnycontour)
+│   ├── contour_v_plot.py        # velocity-channel contour plotting
+│   ├── plot_imshow.py           # imshow-based field snapshot plotting helpers
 │   └── model_eval.py            # ModelEval — full metric suite (nRMSE, fRMSE, MELR, WLR, …)
 │
-└── train/                       # training entry points
+└── train/                       # training entry points and evaluation notebooks
     ├── test_train.py            # PyTorch training script (hardcoded params)
     ├── test_train.ipynb         # PyTorch training notebook
     ├── test_train_mlx.py        # MLX training script (hardcoded params, Mac)
@@ -62,12 +82,12 @@ FNO4d/
     ├── test_mem_data_load.py    # memory profiling — ROOT loader
     ├── test_mem_data_load_hdf5.py # memory profiling — HDF5 loader
     ├── apply.py                 # marimo inference app
-    ├── eval_model_test_torch.py # PyTorch eval — imshow visualisation
-    ├── eval_model_test_mlx.py   # MLX eval — imshow visualisation
+    ├── eval_model_test_torch.py # PyTorch eval — imshow field snapshots
+    ├── eval_model_test_mlx.py   # MLX eval — imshow field snapshots
     ├── eval_model_test_cont_torch.py  # PyTorch eval — skinnycontour CDF contours
     ├── eval_model_test_cont_mlx.py    # MLX eval — skinnycontour CDF contours
-    ├── eval_model_test_metric_torch.py # PyTorch eval — full metric suite
-    └── eval_model_test_metric_mlx.py   # MLX eval — full metric suite
+    ├── eval_model_test_metric_torch.py # PyTorch eval — full ModelEval metric suite
+    └── eval_model_test_metric_mlx.py   # MLX eval — full ModelEval metric suite
 ```
 
 ---
@@ -527,10 +547,10 @@ surrogates.  It works on raw NumPy arrays and has no dependency on PyTorch or ML
 | **Pointwise** | nRMSE, RMSE | Overall field accuracy — the headline number |
 | **Pointwise** | MaxError | Worst-case local failure (freeze-out surface spikes) |
 | **Pointwise** | bRMSE | Accuracy at the domain boundary (freeze-out proxy) |
-| **Pointwise** | cRMSE | Violations of global energy-momentum conservation |
+| **Pointwise** | cRMSE | Violations of global energy-momentum conservation (ε channel) |
 | **Pointwise** | vRMSE | Whether spatial contrast (not just mean level) is reproduced |
 | **Spectral** | fRMSE (low/mid/high) | Scale-resolved errors; catches FNO over-smoothing |
-| **Spectral** | MELR | Spectral energy bias (negative = over-smooth, typical for FNO) |
+| **Spectral** | MELR | Spectral energy bias (negative = over-smooth; positive = freeze-out leakage) |
 | **Spectral** | WLR | Spectral shape distortion independent of total energy |
 | **Spectral** | Spectral error map | 2-D Fourier-space failure pattern |
 | **Spectral** | Energy spectrum | log-log E(K) cascade fidelity over time |
@@ -551,18 +571,22 @@ from model_eval import ModelEval
 
 # pred, true: (N, C, nx, ny, neta, T)  — physical units, initial condition excluded
 ev = ModelEval(
-    pred          = model_out_phys,
-    true          = y_true_phys,
-    tau_coords    = tau_out_coords,   # fm/c
-    eta_coords    = eta_coords,
-    channel_names = ['ε', 'vx', 'vy', 'vη'],
+    pred             = model_out_phys,
+    true             = y_true_phys,
+    tau_coords       = tau_out_coords,   # fm/c
+    eta_coords       = eta_coords,
+    channel_names    = ['ε', 'vx', 'vy', 'vη'],
+    active_threshold = 0.3,  # mask freeze-out cells (≈ T_c → ε_c ≈ 0.3 GeV/fm³)
 )
 
 # All scalar metrics at once
 print(ev.summary())
-# {'nRMSE': 0.084, 'MaxError': 0.31, 'bRMSE': 0.087, 'cRMSE': 0.021,
+# {'nRMSE': 0.084, 'MaxError': 0.31, 'bRMSE': 0.087,
+#  'cRMSE_e0': 0.021,      ← ε channel only — conservation law test
+#  'cRMSE_all': 0.035,     ← all channels, L1-floored denominator
 #  'fRMSE_low': 0.070, 'fRMSE_mid': 0.086, 'fRMSE_high': 0.123,
-#  'MELR': -0.152, 'WLR': 0.087, ...}
+#  'MELR': -0.152, 'WLR': 0.087,
+#  'active_frac': 0.215}   ← 21.5 % of cells above freeze-out threshold
 
 # 2×3 dashboard figure
 fig = ev.plot_dashboard(channel=0, ieta=0)
@@ -574,20 +598,29 @@ with open('out/metrics_eval.json', 'w') as f:
     json.dump(ev.summary(), f, indent=2)
 ```
 
+> **Sparse-field note:** without `active_threshold`, normalized metrics (nRMSE,
+> vRMSE, fRMSE) can reach thousands on real hydro data because the many freeze-out
+> zero cells collapse the denominator.  Set `active_threshold` to the QCD crossover
+> energy density (≈ 0.3 GeV/fm³) to restrict averages to the hot active core.
+> The marimo notebooks expose this as an interactive slider (default 0.3).
+
 The `fRMSE_high` being noticeably larger than `fRMSE_low` and a negative `MELR`
-are the standard FNO signature of high-frequency over-smoothing.
+are the standard FNO signature of high-frequency over-smoothing.  A positive `MELR`
+indicates the model is leaking predictions into freeze-out cells.
 
 ### Minimum publication checklist
 
 ```
-nRMSE             — headline pointwise accuracy
+active_frac        — quote so readers know what fraction of the field was evaluated
+nRMSE              — headline pointwise accuracy
 fRMSE low/mid/high — scale-resolved error; exposes smoothing invisible to nRMSE
-MELR              — signed spectral energy bias (negative = over-smooth)
-AR rollout curve  — nRMSE vs τ under autoregressive stepping (1-step models)
+MELR               — signed spectral energy bias (negative = over-smooth; positive = leakage)
+cRMSE_e0           — energy conservation test (ε channel only)
+AR rollout curve   — nRMSE vs τ under autoregressive stepping (1-step models)
 ```
 
-Add `cRMSE` when conservation-law fidelity is important, and v₂/v₃/⟨pT⟩
-(via Cooper-Frye freeze-out, not yet automated) as the final physics gate.
+Add v₂/v₃/⟨pT⟩ (via Cooper-Frye freeze-out, not yet automated) as the final
+physics gate.
 
 ### Documentation
 
