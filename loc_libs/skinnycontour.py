@@ -9,29 +9,24 @@ def get_topcdf_value(X, cdf_ratio):
     input: X: tensor, cdf_ratio: float in 0..1
     output: float
     Return the value of the cdf_ratio-th percentile of the
-    values in X
+    values in X, computed only over positive (non-freeze-out) cells.
     '''
-    # Flatten the tensor
-    flat_X = X.flatten()
-    
-    # Sort the flattened tensor
-    sorted_X = np.sort(flat_X)[::-1]
-    
-    # Calculate the cumulative sum
+    pos_X = X.flatten()
+    pos_X = pos_X[pos_X > 0]
+    if pos_X.size == 0:
+        return 0.0
+    sorted_X = np.sort(pos_X)[::-1]
     cumulative_sum = np.cumsum(sorted_X)
-    
-    # Find the threshold value for the top cdfval
     total_sum = cumulative_sum[-1]
+    if total_sum <= 0:
+        return 0.0
     threshold_index = np.searchsorted(cumulative_sum, cdf_ratio * total_sum)
-    
-    try:
-        return sorted_X[threshold_index]
-    except:
-        print('failed to get topcdf value')
+    if threshold_index >= len(sorted_X):
         return sorted_X[-1]
+    return sorted_X[threshold_index]
 
 
-def draw_contour_lines(dat, *,  rescale=None, val=None, cdfrat=None, linestyle='dashed',color='red',linewidth=1, styles=[],alpha=1):
+def draw_contour_lines(dat, *,  rescale=None, val=None, cdfrat=None, linestyle='dashed',color='red',linewidth=1, styles=[],alpha=1, extent=None):
     '''
     input: mask: tensor
     output: None
@@ -45,16 +40,25 @@ def draw_contour_lines(dat, *,  rescale=None, val=None, cdfrat=None, linestyle='
         val = get_topcdf_value(dat, cdfrat)
 
     contours = find_contours(dat, level=val)
-    if rescale:
+
+    if extent is not None:
+        # Convert pixel-space (row, col) → physical (y_fm, x_fm)
+        ny, nx = dat.shape
+        xmin, xmax, ymin, ymax = extent
+        dx = (xmax - xmin) / nx
+        dy = (ymax - ymin) / ny
+        contours = [np.column_stack([ymin + c[:, 0] * dy, xmin + c[:, 1] * dx])
+                    for c in contours]
+    elif rescale:
         try:
-            contours[0] = contours[0]*rescale
+            contours[0] = contours[0] * rescale
         except:
-            print('failed to find contrours for rescale')
-    
+            print('failed to find contours for rescale')
+
     if styles:
         for n, contour in enumerate(contours):
-            for linestyle, color, linewidth in styles:
-                plt.plot(contour[:, 1], contour[:, 0], linestyle=linestyle, color=color, linewidth=linewidth, alpha=alpha)
+            for ls, col, lw in styles:
+                plt.plot(contour[:, 1], contour[:, 0], linestyle=ls, color=col, linewidth=lw, alpha=alpha)
     else:
         for n, contour in enumerate(contours):
             plt.plot(contour[:, 1], contour[:, 0], linestyle=linestyle, color=color, linewidth=linewidth, alpha=alpha)
@@ -63,47 +67,46 @@ def draw_contour_lines(dat, *,  rescale=None, val=None, cdfrat=None, linestyle='
 
 
 def plot_contour(dat_model: np.ndarray, # predicted 2D array
-                 dat_truth: np.ndarray, # truth 2D array 
+                 dat_truth: np.ndarray, # truth 2D array
                  cdfrats = [0.05,.1,.2,.3,.4,.6],
                  axis: plt.Axes = None, # if none, create new figure
-                 xlim: tuple = None, # (15, 45),
-                 ylim: tuple = None, # default to xlim
+                 xlim: tuple = None,
+                 ylim: tuple = None,
                  tau: float = 0.6,
-                 #topadjust=0.85, 
-                 #tag='', 
-                 show_FNO=True, 
-                 show_cdflines=True, 
-                 show_cdfvals=True, 
-                 # fn=None, 
-                 rescale=None, 
+                 show_FNO=True,
+                 show_cdflines=True,
+                 show_cdfvals=True,
+                 rescale=None,
                  title='',
-                 save=None):
+                 save=None,
+                 extent=None):   # [xmin, xmax, ymin, ymax] in fm
 
     if axis is None:
         fig, axis = plt.subplots(1, 1, figsize=(4.5, 4.5))
 
-    axis.imshow(dat_truth, origin='lower', cmap='viridis') #extent=(0, 30, 0, 30))
+    axis.imshow(dat_truth, origin='lower', cmap='viridis', extent=extent)
     plt.sca(axis)
 
-    # Rescale tick marks
-    if ylim == (15, 45):
-        ticks = np.arange(15, 50, 5)  # Original tick positions
-        new_labels = ticks / 2  # Rescale the labels
-        axis.set_xticks(ticks)
-        axis.set_xticklabels(new_labels)
-        axis.set_yticks(ticks)
-        axis.set_yticklabels(new_labels)
-        plt.sca(axis)
-        axis.tick_params(axis='both', which='major', length=8, width=2, labelsize=15)
-        axis.tick_params(axis='both', which='minor', length=5, width=1)
-    elif ylim == (0, 60):
-        ticks = np.arange(0, 61, 10)
-        new_labels = ticks / 2  # Rescale the labels
-        axis.set_xticks(ticks)
-        axis.set_xticklabels(new_labels)
-        axis.set_yticks(ticks)
-        axis.set_yticklabels(new_labels)
-        plt.sca(axis)
+    # Legacy pixel-space tick rescaling (only when no physical extent is given)
+    if extent is None:
+        if ylim == (15, 45):
+            ticks = np.arange(15, 50, 5)
+            new_labels = ticks / 2
+            axis.set_xticks(ticks)
+            axis.set_xticklabels(new_labels)
+            axis.set_yticks(ticks)
+            axis.set_yticklabels(new_labels)
+            plt.sca(axis)
+            axis.tick_params(axis='both', which='major', length=8, width=2, labelsize=15)
+            axis.tick_params(axis='both', which='minor', length=5, width=1)
+        elif ylim == (0, 60):
+            ticks = np.arange(0, 61, 10)
+            new_labels = ticks / 2
+            axis.set_xticks(ticks)
+            axis.set_xticklabels(new_labels)
+            axis.set_yticks(ticks)
+            axis.set_yticklabels(new_labels)
+            plt.sca(axis)
 
     cnt = 0
     xcntl = 0.015
@@ -112,7 +115,7 @@ def plot_contour(dat_model: np.ndarray, # predicted 2D array
 
     tcolor = "#a9e4f3"  # lighter red
 
-    axis.text( 
+    axis.text(
         0.655,
         0.94,
         r'$\mathbf{\tau}$'+f'={tau:.1f} '+r'fm/$\mathbf{c}$',
@@ -132,7 +135,9 @@ def plot_contour(dat_model: np.ndarray, # predicted 2D array
         cnt = 0
         # draw truth lines first, and then the model lines
         for cdf in cdfrats:
-            Tval=draw_contour_lines(dat_truth, rescale=rescale, cdfrat=cdf, color=tcolor, linestyle='solid', styles=[('solid', 'white', 1.5),('dotted','black',1.5)])
+            Tval = draw_contour_lines(dat_truth, rescale=rescale, cdfrat=cdf, color=tcolor,
+                                      linestyle='solid', extent=extent,
+                                      styles=[('solid', 'white', 1.5), ('dotted', 'black', 1.5)])
             Tvals.append(Tval)
 
             if show_cdfvals:
@@ -170,10 +175,11 @@ def plot_contour(dat_model: np.ndarray, # predicted 2D array
             for n, Tval in enumerate(Tvals):
                 cdf = cdfrats[n]
 
-                Pval = draw_contour_lines(dat_model, rescale=rescale, cdfrat=cdf, color='red', linestyle='solid',linewidth=1.8, alpha=0.5)
-                # title += f'\n{cdf*100:2.0f}%: P={Pval:5.3f}'
+                Pval = draw_contour_lines(dat_model, rescale=rescale, cdfrat=cdf, color='red',
+                                          linestyle='solid', linewidth=1.8, alpha=0.5,
+                                          extent=extent)
                 delta = Pval - Tval
-                drat = (delta / Tval)*100
+                drat = (delta / Tval) * 100 if Tval != 0 else 0.0
                 if abs(drat) < 1.:
                     textp = f'{drat:.2f}'
                 elif abs(drat) < 10:
@@ -203,20 +209,19 @@ def plot_contour(dat_model: np.ndarray, # predicted 2D array
             axis.set_ylim(ylim)
         if xlim:
             axis.set_xlim(xlim)
-        axis.set_xlabel('x [fm]')
-        axis.set_ylabel('y [fm]', fontsize=16)
         axis.set_xlabel('x [fm]', fontsize=16)
+        axis.set_ylabel('y [fm]', fontsize=16)
         cbar = plt.colorbar(axis.images[0], ax=axis)
         cbar.ax.tick_params(labelsize=16)
-        # plt.colorbar(axes[i].imagesg[0], ax=axes[i])
 
 
 def plot_three_bins_contour (P, T, iparam=0, event=0, tau0=0.5, taudelta=0.1, iT=(0, 25, 48),
     cdfrats=[0.05,.1,.2,.3,.4,.6], ylim=None, xlim=None,
-    topadjust=0.85, 
-    tag='', show_FNO=True, show_cdflines=True, 
+    topadjust=0.85,
+    tag='', show_FNO=True, show_cdflines=True,
     show_cdfvals=True, fn=None, rescale=None, save=None, fig=None, axes=None, ieta=0,
-    taulabel_offset=0, rescale_energy=True, plot_mean_energy=False):
+    taulabel_offset=0, rescale_energy=True, plot_mean_energy=False,
+    x_coords=None, y_coords=None):
 
     if show_cdfvals and not show_FNO:
       raise ValueError('show_FNO requires show_cdfvals to be True')
@@ -229,6 +234,14 @@ def plot_three_bins_contour (P, T, iparam=0, event=0, tau0=0.5, taudelta=0.1, iT
         tag = f'Vx: {tag}'
     elif iparam == 3:
         tag = f'Vz: {tag}'
+
+    # Build physical extent from coordinate arrays if provided
+    _extent = None
+    if x_coords is not None and y_coords is not None:
+        dx = float(x_coords[1] - x_coords[0]) if len(x_coords) > 1 else 1.0
+        dy = float(y_coords[1] - y_coords[0]) if len(y_coords) > 1 else 1.0
+        _extent = [x_coords[0] - dx / 2, x_coords[-1] + dx / 2,
+                   y_coords[0] - dy / 2, y_coords[-1] + dy / 2]
 
     if axes is None:
         fig, axes = plt.subplots(1, 3, figsize=(16.0, 4.5))
@@ -273,7 +286,8 @@ def plot_three_bins_contour (P, T, iparam=0, event=0, tau0=0.5, taudelta=0.1, iT
         plot_contour(dat_model, dat_truth, cdfrats=cdfrats, axis=axes[i],
                      xlim=xlim, ylim=ylim, title=title, tau=tau,
                      show_FNO=show_FNO, show_cdflines=show_cdflines,
-                     show_cdfvals=show_cdfvals, rescale=rescale)
+                     show_cdfvals=show_cdfvals, rescale=rescale,
+                     extent=_extent)
 
         continue
 

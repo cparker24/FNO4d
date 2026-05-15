@@ -1,12 +1,19 @@
 # FNO Evaluation Scripts
 
-Two [marimo](https://marimo.io) notebooks for evaluating trained FNO models on test data.
+Four [marimo](https://marimo.io) notebooks for evaluating trained FNO models on test data.
 See the main README for environment setup and dependencies.
 
-| Script | Framework | Checkpoint formats |
-|---|---|---|
-| `train/eval_model_test_torch.py` | PyTorch | `.pt` files written by the PyTorch training scripts |
-| `train/eval_model_test_mlx.py` | MLX | MLX `.safetensors` (native) or PyTorch `.pt` (via weight transfer) |
+| Script | Framework | Visualisation | Checkpoint formats |
+|---|---|---|---|
+| `train/eval_model_test_torch.py` | PyTorch | `imshow` (truth / FNO rows) | `.pt` files written by the PyTorch training scripts |
+| `train/eval_model_test_mlx.py` | MLX | `imshow` (truth / FNO rows) | MLX `.safetensors` (native) or PyTorch `.pt` (via weight transfer) |
+| `train/eval_model_test_cont_torch.py` | PyTorch | skinnycontour (CDF contour lines) | `.pt` files written by the PyTorch training scripts |
+| `train/eval_model_test_cont_mlx.py` | MLX | skinnycontour (CDF contour lines) | MLX `.safetensors` (native) or PyTorch `.pt` (via weight transfer) |
+
+The `_cont_*` scripts use the **skinnycontour** approach from `apply.py`: truth is shown as a
+background image with white/black CDF-level contour lines overlaid, and the FNO prediction is
+overlaid as red contour lines at the same levels.  Three τ snapshots per η bin are shown
+side-by-side.
 
 ---
 
@@ -16,27 +23,36 @@ Run as an interactive notebook (recommended):
 
 ```bash
 cd train/
+
+# imshow-based scripts
 marimo run eval_model_test_torch.py
 marimo run eval_model_test_mlx.py
+
+# skinnycontour scripts
+marimo run eval_model_test_cont_torch.py
+marimo run eval_model_test_cont_mlx.py
 ```
 
 Run non-interactively (executes all cells top-to-bottom, shows plots inline):
 
 ```bash
-marimo run eval_model_test_torch.py --headless
+marimo run eval_model_test_cont_torch.py --headless
 ```
 
 Edit the source while keeping live reactivity (developer mode):
 
 ```bash
-marimo edit eval_model_test_torch.py
+marimo edit eval_model_test_cont_torch.py
 ```
 
 ---
 
 ## UI controls
 
-Both notebooks expose the same set of controls in the first cell.
+All four notebooks share the core set of controls described below.
+The `_cont_*` scripts add four additional controls (see
+[Skinnycontour controls](#skinnycontour-controls-cont_-scripts-only))
+and replace the per-τ `τ output indices` field with a fixed three-panel layout.
 
 ### Config YAML
 **Default:** `./config_test_train.yaml`
@@ -68,7 +84,7 @@ checkpoints/
 
 ### Checkpoint type
 
-#### `eval_model_test_torch.py`
+#### PyTorch scripts (`eval_model_test_torch.py`, `eval_model_test_cont_torch.py`)
 
 | Value | File loaded | When to use |
 |---|---|---|
@@ -76,7 +92,7 @@ checkpoints/
 | `last` | `last_model.pt` | Final epoch saved by `save_last_checkpoint` |
 | `checkpoint_N` | `checkpoint_N/best_model_state_dict.pt` | Periodic intermediate checkpoint (set **Epoch N** below) |
 
-#### `eval_model_test_mlx.py`
+#### MLX scripts (`eval_model_test_mlx.py`, `eval_model_test_cont_mlx.py`)
 
 | Value | File loaded | Mechanism |
 |---|---|---|
@@ -128,7 +144,7 @@ nevents: -1   # full dataset
 Which event (0-based index into the test set) to use for the contour plots.
 The L² error plot always averages over **all** test events regardless of this setting.
 
-### τ output indices
+### τ output indices  *(imshow scripts only)*
 **Default:** `5,10,15,-1`
 
 Comma-separated list of τ output indices to visualise. Each index refers to a
@@ -158,9 +174,49 @@ Which field component to plot.
 
 ---
 
+## Skinnycontour controls (`_cont_*` scripts only)
+
+### η bin
+**Default:** `-1` (all η bins)
+
+Which η bin to plot. Set to `-1` to loop over every η bin and produce one 3-panel
+figure per bin. Set to a specific index (e.g. `2`) to produce a single figure for
+that bin — useful for quick checks.
+
+### 3 τ-step indices for contour panels
+**Default:** `5,10,-1`
+
+Exactly three comma-separated output-step indices selecting the three side-by-side
+τ snapshots. The same index convention applies as for the imshow scripts: 0-based,
+`-1` = last non-zero time step (the function searches backwards from the end to skip
+freeze-out steps).
+
+```
+5,10,-1      # early, mid, final
+0,10,20      # three explicit steps
+```
+
+### CDF ratios for contour levels
+**Default:** `0.05,0.1,0.2,0.3,0.4,0.6`
+
+Comma-separated list of cumulative-energy fractions used to determine the contour
+level values.  For each ratio *r*, the contour is drawn at the field value that
+accounts for the top-*r* fraction of the total integrated field (energy density, or
+whichever channel is selected).  Smaller values → tighter (hotter) contours.
+
+### Rescale energy: (e/τ)^(4/3)
+**Default:** checked
+
+When enabled, energy-density values are rescaled by `(e / τ)^(4/3)` before computing
+contours, matching the Bjorken-scaling convention used in `apply.py`.  This highlights
+deviations from ideal hydrodynamic scaling and is the standard display mode.  Uncheck
+to plot raw energy density.
+
+---
+
 ## Output
 
-### Contour plots
+### Imshow plots (`eval_model_test_torch.py`, `eval_model_test_mlx.py`)
 
 One figure is produced per η bin. Each figure has:
 - **Rows:** Truth (top) / FNO prediction (bottom)
@@ -170,6 +226,19 @@ One figure is produced per η bin. Each figure has:
 - **Colour map:** `hot`
 
 Title format: `η = {value}  (event {N})`
+
+### Skinnycontour plots (`eval_model_test_cont_torch.py`, `eval_model_test_cont_mlx.py`)
+
+One figure is produced per η bin (or for the single selected bin).  Each figure has:
+- **Layout:** 1 row × 3 columns, one column per selected τ-step index
+- **Background:** truth field rendered with `imshow` (viridis colourmap)
+- **White/black contour lines:** truth field at the selected CDF levels
+- **Red contour lines:** FNO prediction at the same CDF levels, allowing direct comparison
+- **Annotations:** CDF percentile labels (left side) and the predicted-minus-truth fractional
+  deviation at each level (right side, red)
+- **τ label:** physical τ in fm/c shown in the upper-right corner of each panel
+
+Title format: `{channel} Energy/Vy/Vx/Vz: η={value} Event {N}. Contours: Truth: black. FNO: red.`
 
 ### L² error plot
 
@@ -230,7 +299,7 @@ YAML key):
 
 ## Examples
 
-### Evaluate the best PyTorch model on the training-data test split
+### Evaluate the best PyTorch model on the training-data test split (imshow)
 
 ```bash
 cd train/
@@ -242,6 +311,29 @@ marimo run eval_model_test_torch.py
 #   Eval file:      (empty)
 #   τ indices:      5,10,15,-1
 #   Channel:        0
+```
+
+### Skinnycontour evaluation with the PyTorch model
+
+```bash
+marimo run eval_model_test_cont_torch.py
+# In the UI:
+#   Config YAML:    ./config_test_train.yaml
+#   Model dir:      ./checkpoints
+#   Checkpoint:     best
+#   Contour τ idx:  5,10,-1
+#   CDF ratios:     0.05,0.1,0.2,0.3,0.4,0.6
+#   Rescale energy: checked
+#   η bin:          -1   (all bins)
+```
+
+### Skinnycontour evaluation with the MLX model (native checkpoint)
+
+```bash
+marimo run eval_model_test_cont_mlx.py
+# In the UI:
+#   Checkpoint:     best
+#   Model dir:      ./checkpoints
 ```
 
 ### Evaluate the last MLX checkpoint on a separate file
@@ -257,7 +349,7 @@ marimo run eval_model_test_mlx.py
 ### Load a PyTorch checkpoint into the MLX model (weight transfer)
 
 ```bash
-marimo run eval_model_test_mlx.py
+marimo run eval_model_test_cont_mlx.py
 # In the UI:
 #   Checkpoint:     pytorch_best
 #   Model dir:      ./checkpoints
@@ -266,8 +358,12 @@ marimo run eval_model_test_mlx.py
 ### Inspect a periodic checkpoint at epoch 20
 
 ```bash
-# PyTorch
+# PyTorch (imshow)
 marimo run eval_model_test_torch.py
+# Checkpoint: checkpoint_N,  Epoch N: 20
+
+# PyTorch (skinnycontour)
+marimo run eval_model_test_cont_torch.py
 # Checkpoint: checkpoint_N,  Epoch N: 20
 
 # MLX native
@@ -275,10 +371,22 @@ marimo run eval_model_test_mlx.py
 # Checkpoint: checkpoint_N,  Epoch N: 20
 
 # MLX loading from the PyTorch checkpoint at epoch 20
+marimo run eval_model_test_cont_mlx.py
 # Checkpoint: pytorch_checkpoint_N,  Epoch N: 20
 ```
 
-### Plot only the final τ step for a specific event
+### Plot a single η bin at three specific τ steps (skinnycontour)
+
+```
+3 τ-step indices:  5,10,-1
+η bin:             2
+Channel:           0
+Rescale energy:    checked
+```
+
+One 3-panel figure is produced for η bin 2 only.
+
+### Plot only the final τ step for a specific event (imshow)
 
 ```
 τ indices:   -1
