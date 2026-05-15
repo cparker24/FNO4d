@@ -8,8 +8,10 @@ _pycache__/
 *.code-workspace
 train/*.json
 *.svg
-train/*/
-train/*.pt
-train/*.pkl
-train/*/*.json
-train/*/*.npz
+train*/*/
+train*/*.pt
+train*/*.pkl
+train*/*/*.json
+train*/*/*.npz
+data/*
+*-gcs.json

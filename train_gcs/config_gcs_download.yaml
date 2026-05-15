@@ -1,0 +1,73 @@
+# ---------------------------------------------------------------------------
+# FNO training config — GCS download-then-read mode
+#
+# Usage:
+#   python test_train_yaml_norm_gcs_download.py     [--config config_gcs_download.yaml]
+#   python test_train_mlx_yaml_norm_gcs_download.py [--config config_gcs_download.yaml]
+#
+# ROOT files are downloaded from GCS to local_data_dir before training.
+# Subsequent runs reuse the cached local files (size-matched) unless
+# overwrite_cache is set to true.
+#
+# Install GCS dependencies first:
+#   pip install -e '../loc_libs[gcs]'
+#   # or: pip install -r ../requirements-gcs.txt
+# ---------------------------------------------------------------------------
+
+# --- GCS authentication ---
+# Path to a GCS service-account JSON key file.  The account needs at least
+# the "Storage Object Viewer" role on the bucket.  To also upload outputs
+# after training, it needs "Storage Object Creator" (or "Storage Object User"
+# to allow overwriting existing blobs).
+gcs_key_file: ./fnotest-wayne-gcs.json
+
+# --- post-training upload (optional) ---
+# If set, model_dir is uploaded to {gcs_output_prefix}/checkpoints and odir
+# is uploaded to {gcs_output_prefix}/logs after training completes.
+# Remove this key or set it to null to skip the upload.
+gcs_output_prefix: gs://test_fno/runs/run01
+
+# --- local data cache ---
+local_data_dir: ../data     # directory where downloaded .root files are stored
+overwrite_cache: false     # set to true to force re-download even if file exists
+
+# --- output ---
+odir: ./out                # logs, metrics, training curves
+model_dir: ./checkpoints   # best_model.safetensors and checkpoints
+
+# --- input data (full gs:// URIs — input_dir is not used in download mode) ---
+input_files:
+  - gs://test_fno/dAu_25ev_mb.root
+  # - gs://my-bucket/data/dAu_25ev_mb_2.root   # add more files here
+
+nevents_in: 10             # number of events to load (-1 = all; MLX default: 10)
+
+# --- normalisation ---
+normalization:
+  name: none               # none | etau75_3d | etau75_eta_3d |
+                           # etau75_eta_shape_3d | cosh_etau75_3d
+  # alpha: 1.0             # exponent for cosh_etau75_3d (default 1.0)
+
+# --- data preparation ---
+train_ratio: 0.8
+xyslice:  [null, -1]       # slice(None, -1) — drop last spatial bin
+tauslice: [null, -1]       # slice(None, -1) — drop last tau bin
+
+# --- model ---
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]  # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 3
+batch_size: 1
+checkpoint_freq: null      # save checkpoint every N epochs; null = disabled
+save_last: true            # save last epoch state to model_dir/last_model.*
+eval_interval: 2           # run evaluation every N epochs
+test_batch_sizes: [10]     # eval batch size per test resolution
+
+# --- optimizer ---
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true         # mirror output to training.log / training_mlx.log

@@ -11,3 +11,6 @@
 # training_utils    – training helpers (enable_log_tee, patch_trainer_checkpoint)
 # parse_training_log – parse and plot neuralop training logs
 # NormFn / NormFn3d  – 3-D+1 normalisation functions (see README_NormFn3d.md)
+# gcs_utils         – Google Cloud Storage helpers (streaming via fsspec, file download)
+#                     Optional: requires  pip install -e './loc_libs[gcs]'
+#                               or:       pip install -r requirements-gcs.txt
