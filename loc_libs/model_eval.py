@@ -28,6 +28,22 @@ Plots
     plot_nrmse_vs_tau(), plot_frmse_vs_tau(), plot_melr_wlr_vs_tau(),
     plot_spectral_error_map(), plot_energy_spectrum(),
     plot_dashboard()  ← 2×3 composite figure
+
+Known failure modes
+-------------------
+1. Sparse-field blow-up (nRMSE, vRMSE, fRMSE >> 1)
+   Cause   : fields with many freeze-out / vacuum cells have near-zero
+             mean(true²) and var(true), making all normalized metrics diverge.
+   Fix     : pass active_threshold (GeV/fm³) or active_mask to ModelEval.
+             Only cells where true[channel_0] > threshold are included in
+             the normalized averages and in the FFTs.
+
+2. cRMSE undefined for symmetric channels (vx, vy, vη)
+   Cause   : velocity fields are antisymmetric → their volume integral ≈ 0
+             → denominator collapses to eps → cRMSE → 10¹³.
+   Fix     : the denominator is now max(|signed_sum|, 0.01 * L1_sum).
+             cRMSE is still most meaningful for channel 0 (ε); treat
+             velocity-channel cRMSE values as approximate only.
 """
 
 from __future__ import annotations
@@ -76,6 +92,16 @@ class ModelEval:
     eta_coords : 1-D array, length neta       — η values
     channel_names : list[str], length C
     eps : small constant to avoid division by zero
+    active_threshold : float or None
+        If given, only cells where true[:, 0] > active_threshold (channel 0,
+        energy density in GeV/fm³) are included in normalized metrics (nRMSE,
+        vRMSE) and in the FFTs used by spectral metrics.  Absolute metrics
+        (RMSE, MaxError, bRMSE) are unaffected.
+        Typical value: 0.1–0.5 GeV/fm³  (just above the QCD freeze-out energy
+        density ~0.3 GeV/fm³ at T_c ≈ 155 MeV).
+    active_mask : ndarray or None
+        Explicit boolean mask, shape (N, nx, ny, neta, T) or
+        (N, C, nx, ny, neta, T).  Takes precedence over active_threshold.
     """
 
     _DEFAULT_CHANNELS = ['ε', 'vx', 'vy', 'vη']
@@ -88,6 +114,8 @@ class ModelEval:
         eta_coords: Optional[np.ndarray] = None,
         channel_names: Optional[List[str]] = None,
         eps: float = 1e-10,
+        active_threshold: Optional[float] = None,
+        active_mask: Optional[np.ndarray] = None,
     ):
         assert pred.shape == true.shape, "pred and true must have identical shapes"
         assert pred.ndim == 6, "Expected shape (N, C, nx, ny, neta, T)"
@@ -108,6 +136,26 @@ class ModelEval:
 
         self._kmap, self._k_shells = _build_kmap(self.nx, self.ny)
 
+        # Active-cell mask — derived from threshold or supplied explicitly.
+        # Shape after construction: (N, C, nx, ny, neta, T) bool.
+        if active_mask is not None:
+            m = np.asarray(active_mask, dtype=bool)
+            if m.ndim == 5:                        # (N, nx, ny, neta, T)
+                m = m[:, np.newaxis]               # → (N, 1, nx, ny, neta, T)
+            self._active_mask: Optional[np.ndarray] = np.broadcast_to(
+                m, self.true.shape
+            ).copy()
+        elif active_threshold is not None:
+            # Drive mask from channel-0 (ε) of the ground truth field
+            m = self.true[:, :1] > active_threshold   # (N, 1, nx, ny, neta, T)
+            self._active_mask = np.broadcast_to(m, self.true.shape).copy()
+        else:
+            self._active_mask = None
+
+        if self._active_mask is not None:
+            frac = self._active_mask[:, 0].mean()
+            print(f'ModelEval: active_mask set — {frac:.1%} of cells are active')
+
         # lazy caches
         self._F_pred: Optional[np.ndarray] = None
         self._F_true: Optional[np.ndarray] = None
@@ -119,10 +167,19 @@ class ModelEval:
     # ------------------------------------------------------------------ #
 
     def _ffts(self) -> Tuple[np.ndarray, np.ndarray]:
-        """rfft2 over (nx, ny) axes → shape (N, C, nx, ny//2+1, neta, T)."""
+        """rfft2 over (nx, ny) axes → shape (N, C, nx, ny//2+1, neta, T).
+
+        When an active_mask is set, inactive cells are zeroed before the FFT
+        so that freeze-out / vacuum regions do not inflate spectral energy.
+        """
         if self._F_pred is None:
-            self._F_pred = np.fft.rfft2(self.pred, axes=(2, 3))
-            self._F_true = np.fft.rfft2(self.true, axes=(2, 3))
+            if self._active_mask is not None:
+                p = self.pred * self._active_mask
+                t = self.true * self._active_mask
+            else:
+                p, t = self.pred, self.true
+            self._F_pred = np.fft.rfft2(p, axes=(2, 3))
+            self._F_true = np.fft.rfft2(t, axes=(2, 3))
         return self._F_pred, self._F_true
 
     def _radial_energies(self) -> Tuple[np.ndarray, np.ndarray]:
@@ -176,9 +233,18 @@ class ModelEval:
         """
         nRMSE per (channel, η, τ): per-sample sqrt(MSE_xy) / RMS_xy(true),
         averaged over events.  Shape (C, neta, T).
+
+        When active_mask is set, the mean is taken only over active cells,
+        preventing freeze-out / vacuum zeros from collapsing the denominator.
         """
-        diff_sq = np.mean((self.pred - self.true) ** 2, axis=(2, 3))  # (N, C, neta, T)
-        true_sq = np.mean(self.true ** 2, axis=(2, 3))
+        if self._active_mask is not None:
+            mf = self._active_mask.astype(np.float64)        # (N, C, nx, ny, neta, T)
+            n_act = np.maximum(mf.sum(axis=(2, 3)), 1)       # (N, C, neta, T)
+            diff_sq = ((self.pred - self.true) ** 2 * mf).sum(axis=(2, 3)) / n_act
+            true_sq = (self.true ** 2 * mf).sum(axis=(2, 3)) / n_act
+        else:
+            diff_sq = np.mean((self.pred - self.true) ** 2, axis=(2, 3))
+            true_sq = np.mean(self.true ** 2, axis=(2, 3))
         per_sample = np.sqrt(diff_sq / np.maximum(true_sq, self.eps))
         return per_sample.mean(axis=0)                                 # (C, neta, T)
 
@@ -205,19 +271,41 @@ class ModelEval:
         """
         Normalized RMSE of volume-integrated fields (proxy for conservation-law
         violations).  Shape (C, T)  — neta is collapsed by the volume integral.
+
+        Denominator: max(|signed_sum|, 0.01 * L1_sum)
+        For energy density (channel 0, always positive) this equals |int_t|,
+        identical to the naive formula.
+        For velocity channels (antisymmetric → signed_sum ≈ 0), the L1 floor
+        replaces the near-zero denominator with 1% of the total velocity
+        magnitude, giving a physically meaningful bound instead of diverging
+        to 10¹³.  Velocity cRMSE values remain approximate; channel 0 is the
+        primary conservation diagnostic.
         """
-        int_p = self.pred.sum(axis=(2, 3, 4))   # (N, C, T)
-        int_t = self.true.sum(axis=(2, 3, 4))
-        rel = np.abs(int_p - int_t) / (np.abs(int_t) + self.eps)
+        int_p     = self.pred.sum(axis=(2, 3, 4))          # (N, C, T)
+        int_t     = self.true.sum(axis=(2, 3, 4))
+        int_abs_t = np.abs(self.true).sum(axis=(2, 3, 4))  # L1 volume integral
+        denom = np.maximum(np.abs(int_t), 0.01 * int_abs_t) + self.eps
+        rel   = np.abs(int_p - int_t) / denom
         return rel.mean(axis=0)                                        # (C, T)
 
     def vrmse(self) -> np.ndarray:
         """
         Variance-normalized RMSE: per-sample sqrt(MSE_xy / var_xy(true)).
         Shape (C, neta, T).
+
+        When active_mask is set, mean and variance are computed only over
+        active cells, preventing near-zero variance from freeze-out regions.
         """
-        mse = np.mean((self.pred - self.true) ** 2, axis=(2, 3))      # (N, C, neta, T)
-        var = np.var(self.true, axis=(2, 3))
+        if self._active_mask is not None:
+            mf    = self._active_mask.astype(np.float64)
+            n_act = np.maximum(mf.sum(axis=(2, 3)), 1)
+            mse   = ((self.pred - self.true) ** 2 * mf).sum(axis=(2, 3)) / n_act
+            mu    = (self.true * mf).sum(axis=(2, 3)) / n_act
+            mu2   = (self.true ** 2 * mf).sum(axis=(2, 3)) / n_act
+            var   = mu2 - mu ** 2
+        else:
+            mse = np.mean((self.pred - self.true) ** 2, axis=(2, 3))
+            var = np.var(self.true, axis=(2, 3))
         per_sample = np.sqrt(mse / np.maximum(var, self.eps))
         return per_sample.mean(axis=0)
 
@@ -369,24 +457,39 @@ class ModelEval:
     #  Summary                                                             #
     # ------------------------------------------------------------------ #
 
+    def active_frac(self) -> float:
+        """Fraction of (x, y, η, τ) cells that are active. 1.0 when no mask set."""
+        if self._active_mask is None:
+            return 1.0
+        return float(self._active_mask[:, 0].mean())
+
     def summary(self) -> Dict[str, float]:
         """
         Scalar summary: mean over all channels, η, τ.
-        cRMSE is averaged over C and τ only (no η dimension).
+
+        cRMSE_e0 is reported separately for channel 0 (energy density only),
+        which is the only channel where the signed volume integral is physically
+        meaningful as a conservation proxy.
+        cRMSE_all is the mean over all channels using the L1-floored denominator.
+        active_frac shows what fraction of cells were included in normalized
+        metrics (1.0 when no active_mask / active_threshold was set).
         """
         frmse_v = self.frmse()
+        crmse_v = self.crmse()   # (C, T)
         return {
             'nRMSE':      float(self.nrmse().mean()),
             'RMSE':       float(self.rmse().mean()),
             'MaxError':   float(self.max_error().mean()),
             'bRMSE':      float(self.brmse().mean()),
-            'cRMSE':      float(self.crmse().mean()),
+            'cRMSE_e0':   float(crmse_v[0].mean()),          # ε channel only
+            'cRMSE_all':  float(crmse_v.mean()),             # all channels
             'vRMSE':      float(self.vrmse().mean()),
             'fRMSE_low':  float(frmse_v['low'].mean()),
             'fRMSE_mid':  float(frmse_v['mid'].mean()),
             'fRMSE_high': float(frmse_v['high'].mean()),
             'MELR':       float(self.melr().mean()),
             'WLR':        float(self.wlr().mean()),
+            'active_frac': self.active_frac(),
         }
 
     # ------------------------------------------------------------------ #

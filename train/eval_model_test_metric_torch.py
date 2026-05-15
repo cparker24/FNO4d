@@ -237,35 +237,40 @@ def _(grid, data_test_norm, np):
 
 @app.cell
 def _(mo, neta_eff):
-    channel_ui     = mo.ui.dropdown(['0 (ε)', '1 (vx)', '2 (vy)', '3 (vη)'],
-                                    value='0 (ε)', label='Channel')
-    ieta_ui        = mo.ui.number(value=0, start=0, step=1, stop=neta_eff - 1,
-                                  label='η bin for spectral plots')
-    spec_tau_ui    = mo.ui.text(value='0,-1',
-                                label='τ indices for energy spectrum (comma-sep)')
-    save_json_ui   = mo.ui.checkbox(value=False, label='Save summary to out/metrics_eval.json')
+    channel_ui          = mo.ui.dropdown(['0 (ε)', '1 (vx)', '2 (vy)', '3 (vη)'],
+                                         value='0 (ε)', label='Channel')
+    ieta_ui             = mo.ui.number(value=0, start=0, step=1, stop=neta_eff - 1,
+                                       label='η bin for spectral plots')
+    spec_tau_ui         = mo.ui.text(value='0,-1',
+                                     label='τ indices for energy spectrum (comma-sep)')
+    active_thresh_ui    = mo.ui.number(value=0.3, start=0.0, step=0.05, stop=5.0,
+                                       label='Active ε threshold (GeV/fm³, 0 = no mask)')
+    save_json_ui        = mo.ui.checkbox(value=False, label='Save summary to out/metrics_eval.json')
     mo.vstack([
         mo.hstack([channel_ui, ieta_ui]),
-        mo.hstack([spec_tau_ui, save_json_ui]),
+        mo.hstack([active_thresh_ui, spec_tau_ui, save_json_ui]),
     ])
-    return (channel_ui, ieta_ui, spec_tau_ui, save_json_ui)
+    return (channel_ui, ieta_ui, spec_tau_ui, active_thresh_ui, save_json_ui)
 
 
 @app.cell
-def _(model_out_phys, y_true_phys, tau_out_coords, eta_coords):
+def _(model_out_phys, y_true_phys, tau_out_coords, eta_coords, active_thresh_ui):
     from model_eval import ModelEval
 
+    _thresh = active_thresh_ui.value if active_thresh_ui.value > 0 else None
     evaluator = ModelEval(
         pred=model_out_phys,
         true=y_true_phys,
         tau_coords=tau_out_coords,
         eta_coords=eta_coords,
         channel_names=['ε', 'vx', 'vy', 'vη'],
+        active_threshold=_thresh,
     )
     print('ModelEval ready —',
           f'N={evaluator.N}, C={evaluator.C}, '
           f'nx={evaluator.nx}, ny={evaluator.ny}, '
-          f'neta={evaluator.neta}, T={evaluator.T}')
+          f'neta={evaluator.neta}, T={evaluator.T}, '
+          f'active_frac={evaluator.active_frac():.3f}')
     return (evaluator,)
 
 
