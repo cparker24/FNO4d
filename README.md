@@ -13,6 +13,37 @@ Two parallel training stacks are provided:
 
 ---
 
+## Table of Contents
+
+- [Repository layout](#repository-layout)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [One-shot install](#one-shot-install)
+  - [Fresh isolated environment (`install_full.sh`)](#fresh-isolated-environment-install_fullsh)
+  - [Manual install](#manual-install-without-the-script)
+  - [Pre-flight checks](#pre-flight-checks)
+  - [Verify the install](#verify-the-install)
+- [Cloud storage](#cloud-storage)
+- [Training](#training)
+  - [Edit parameters](#edit-parameters)
+  - [PyTorch path (Linux / Lambda)](#pytorch-path-linux--lambda)
+  - [MLX path (Mac Silicon)](#mlx-path-mac-silicon)
+  - [Inference / apply](#inference--apply)
+  - [Evaluation](#evaluation)
+- [Model evaluation](#model-evaluation)
+  - [Metric categories](#metric-categories)
+  - [Quick usage](#quick-usage)
+  - [Minimum publication checklist](#minimum-publication-checklist)
+  - [Documentation](#documentation)
+- [Packages](#packages)
+  - [`neuralop_mlx` — MLX FNO (Apple Silicon)](#neuralop_mlx--mlx-fno-apple-silicon)
+  - [`neuralop` — PyTorch neuraloperator (local 4D fork)](#neuralop--pytorch-neuraloperator-local-4d-fork)
+  - [`loc_libs` — data I/O helpers](#loc_libs--data-io-helpers)
+- [Tests](#tests)
+- [Porting status (PyTorch → MLX)](#porting-status-pytorch--mlx)
+
+---
+
 ## Repository layout
 
 ```
