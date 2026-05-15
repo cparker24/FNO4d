@@ -1,15 +1,21 @@
-# FNO4d — 4D Fourier Neural Operator
+# FNO4d — 4D Fourier Neural Operator for Heavy-Ion Collisions
 
 Training pipeline for a 4-dimensional Fourier Neural Operator (FNO) applied to
 relativistic heavy-ion collision data (hydrodynamic initial conditions → final
-state observables).
+state observables). 
+
+The PyTorch FNO implementation in [neuraloperator-4d-2.0.0/](neuraloperator-4d-2.0.0/) is a
+**minimal fork** of the upstream [neuraloperator](https://github.com/neuraloperator/neuraloperator)
+library by Kossaifi, Kovachki, Li, et al. and all credit goes to authors [Credits & Attribution](#credits--attribution). 
+
+The MLX port (heavy usage of Claude Sonnet 4.6) is following the PyTorch implementation as closely as possible, some constraints still exist and not every model can be ported as this moment (see [PORTING_NOTES.md](ORTING_NOTES.md)). Since no real physics tests and direct comparison to the PyTorch version is performed yet, consider the MLX **experimental** and should without out further verification only used to develop infra structure and other aspects localy on a Mac and not physics!
 
 Two parallel training stacks are provided:
 
 | Stack | Package | GPU backend | Target |
 |---|---|---|---|
 | PyTorch | `neuralop` (local fork) | CUDA (Linux) / CPU (Mac) | Lambda GPU instances, HPC |
-| MLX | `neuralop_mlx` | Metal (Apple Silicon) | Mac M-series |
+| MLX | `neuralop_mlx` (experimental)| Metal (Apple Silicon) | Mac M-series |
 
 ---
 
@@ -41,6 +47,7 @@ Two parallel training stacks are provided:
   - [`loc_libs` — data I/O helpers](#loc_libs--data-io-helpers)
 - [Tests](#tests)
 - [Porting status (PyTorch → MLX)](#porting-status-pytorch--mlx)
+- [Credits & Attribution](#credits--attribution)
 
 ---
 
@@ -753,3 +760,74 @@ python -m pytest tests/ -v
 | `UNO`, `RNO` | ❌ Not yet ported |
 | `SFNO`, DISCO layers (`LocalNO`) | ❌ Blocked — depends on `torch_harmonics` |
 | `FNOGNO`, `GINO`, `CODANO` | ❌ Blocked — requires scatter ops (not in MLX) |
+
+---
+
+## Credits & Attribution
+
+### `neuraloperator` — PyTorch package
+
+The PyTorch FNO implementation in [neuraloperator-4d-2.0.0/](neuraloperator-4d-2.0.0/) is a
+**minimal fork** of the upstream [neuraloperator](https://github.com/neuraloperator/neuraloperator)
+library by Kossaifi, Kovachki, Li, et al.  Only the **differentiation and loss subsystems** were
+extended to support **four-dimensional fields** (x, y, z, t); all other code is unchanged from the
+original.  The specific modifications are documented in:
+
+- [neuraloperator-4d-2.0.0/doc4dImp/Fno4dPlan.md](neuraloperator-4d-2.0.0/doc4dImp/Fno4dPlan.md) — implementation plan
+- [neuraloperator-4d-2.0.0/doc4dImp/Fno4dImplementation.md](neuraloperator-4d-2.0.0/doc4dImp/Fno4dImplementation.md) — detailed record of every change made
+
+For full documentation, tutorials, and the upstream API reference see the
+[neuraloperator documentation site](https://neuraloperator.github.io/dev/index.html).
+
+If you use the PyTorch FNO in your work, please cite the upstream library papers:
+
+**Library paper** ([arXiv:2412.10354](https://arxiv.org/abs/2412.10354))
+```bibtex
+@article{kossaifi2025librarylearningneuraloperators,
+  author  = {Jean Kossaifi and Nikola Kovachki and Zongyi Li and David Pitt and
+             Miguel Liu-Schiaffini and Robert Joseph George and Boris Bonev and
+             Kamyar Azizzadenesheli and Julius Berner and Valentin Duruisseaux and
+             Anima Anandkumar},
+  title   = {A Library for Learning Neural Operators},
+  journal = {arXiv preprint arXiv:2412.10354},
+  year    = {2025},
+}
+```
+
+**FNO practical guide** ([arXiv:2512.01421](https://arxiv.org/abs/2512.01421))
+```bibtex
+@article{duruisseaux2025guide,
+  author  = {Valentin Duruisseaux and Jean Kossaifi and Anima Anandkumar},
+  title   = {Fourier Neural Operators Explained: A Practical Perspective},
+  journal = {arXiv preprint arXiv:2512.01421},
+  year    = {2025},
+}
+```
+
+**Neural operator theory** ([arXiv:2108.08481](https://arxiv.org/abs/2108.08481))
+```bibtex
+@article{kovachki2023neuraloperator,
+  author    = {Nikola Kovachki and Zongyi Li and Burigede Liu and
+               Kamyar Azizzadenesheli and Kaushik Bhattacharya and
+               Andrew Stuart and Anima Anandkumar},
+  title     = {Neural Operator: Learning Maps Between Function Spaces
+               with Applications to PDEs},
+  journal   = {Journal of Machine Learning Research},
+  volume    = {24},
+  number    = {1},
+  articleno = {89},
+  year      = {2023},
+}
+```
+
+### `neuralop_mlx` — MLX port (experimental)
+
+> **Warning:** The MLX port (`neuralop_mlx/`) is **experimental**.  The API may change, not
+> all upstream `neuraloperator` features are ported (see [Porting status](#porting-status-pytorch--mlx)),
+> and it has not been validated on the same range of datasets as the PyTorch stack.
+
+The MLX port is an independent reimplementation of the FNO and its training infrastructure in
+[Apple MLX](https://github.com/ml-explore/mlx), written to match the behaviour of the PyTorch
+stack on Apple Silicon.  It is not a mechanical translation of the upstream `neuraloperator`
+source.  Weight transfer from trained PyTorch checkpoints is supported via `load_from_torch`
+(see [README_mlx.md](README_mlx.md) and [PORTING_NOTES.md](PORTING_NOTES.md)).
