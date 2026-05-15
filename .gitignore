@@ -1,11 +1,14 @@
-__pycache__/
+_pycache__/
 *.pyc
+*venv*
+*loc_libs.egg-info*
 .DS_Store
 *.log
 *.safetensors
 *.code-workspace
 train/*.json
 *.svg
+train/*/
 train/*.pt
 train/*.pkl
 train/*/*.json
