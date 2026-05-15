@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# check_install_sys.sh — Pre-flight checks for install.sh
+# check_install.sh — Pre-flight checks for install.sh
 #
 # Mirrors every probe that install.sh performs WITHOUT modifying the
-# environment.  Differs from check_install.sh in three important ways:
+# environment.  Differs from check_install_full.sh in three important ways:
 #
 #   1. The probe venv uses --system-site-packages, so packages already
 #      present in the system / active conda env are visible.
@@ -11,7 +11,7 @@
 #   3. An existing fsspec version is detected and shown as a constraint.
 #
 # Usage (same flags as install.sh):
-#   bash check_install_sys.sh [--s3] [--gcs] [--conda]
+#   bash check_install.sh [--s3] [--gcs] [--conda]
 
 set -euo pipefail
 
@@ -31,7 +31,7 @@ FAILURES=0
 # ── usage ─────────────────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
-Usage: bash check_install_sys.sh [--s3] [--gcs] [--conda]
+Usage: bash check_install.sh [--s3] [--gcs] [--conda]
 
 Probes every install step from install.sh without installing anything.
 Use the same flags you plan to pass to install.sh.

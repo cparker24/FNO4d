@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# check_install.sh — Pre-flight checks for install_full.sh
+# check_install_full.sh — Pre-flight checks for install_full.sh
 #
 # Runs every package-resolution probe that install_full.sh would perform,
 # WITHOUT creating the target environment or downloading/installing anything.
 # Exits non-zero (exit code = number of failures) if any probe fails.
 #
 # Pass the same flags you intend to use with install_full.sh:
-#   bash check_install.sh --venv  [--name NAME] [--torch VERSION] [--s3] [--gcs]
-#   bash check_install.sh --conda [--name NAME] [--torch VERSION] [--s3] [--gcs]
+#   bash check_install_full.sh --venv  [--name NAME] [--torch VERSION] [--s3] [--gcs]
+#   bash check_install_full.sh --conda [--name NAME] [--torch VERSION] [--s3] [--gcs]
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ FAILURES=0
 # ── usage ─────────────────────────────────────────────────────────────────────
 usage() {
     cat <<EOF
-Usage: bash check_install.sh [--venv|--conda] [--name NAME] [--torch VERSION] [--s3] [--gcs]
+Usage: bash check_install_full.sh [--venv|--conda] [--name NAME] [--torch VERSION] [--s3] [--gcs]
 
 Probes every install step from install_full.sh without installing anything.
 Use the same flags you plan to pass to install_full.sh.

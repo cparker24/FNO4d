@@ -21,8 +21,8 @@ FNO4d/
 ├── install.sh                   # install into current env (inherits system packages)
 ├── install_full.sh              # create a fresh isolated env (conda or virtualenv)
 ├── install_kernel.sh            # register active env as a Jupyter kernel
-├── check_install_sys.sh         # pre-flight checks for install.sh (mirrors its probes)
-├── check_install.sh             # pre-flight checks for install_full.sh
+├── check_install.sh             # pre-flight checks for install.sh (mirrors its probes)
+├── check_install_full.sh        # pre-flight checks for install_full.sh
 ├── requirements-base.txt        # shared deps (both platforms)
 ├── requirements-mac.txt         # Mac Silicon: adds torch + mlx
 ├── requirements-linux.txt       # Linux/Lambda: adds nothing (torch auto-detected)
@@ -342,23 +342,23 @@ anything.  Exit code equals the number of failures (0 = all clear).
 
 | Script | Pairs with | Notes |
 |---|---|---|
-| `check_install_sys.sh` | `install.sh` | Creates a temporary `--system-site-packages` probe venv so already-installed packages are visible, matching `install.sh`'s behaviour. |
-| `check_install.sh` | `install_full.sh` | Probes the resolution of a fully isolated environment (no inherited packages). |
+| `check_install.sh` | `install.sh` | Creates a temporary `--system-site-packages` probe venv so already-installed packages are visible, matching `install.sh`'s behaviour. |
+| `check_install_full.sh` | `install_full.sh` | Probes the resolution of a fully isolated environment (no inherited packages). |
 
 Pass the **same flags** you plan to use with the matching installer:
 
 ```bash
 # Pair with install.sh
-bash check_install_sys.sh                   # default venv mode
-bash check_install_sys.sh --conda           # --conda mode
-bash check_install_sys.sh --s3 --gcs        # + cloud backends
-bash check_install_sys.sh --conda --s3      # conda + S3
+bash check_install.sh                   # default venv mode
+bash check_install.sh --conda           # --conda mode
+bash check_install.sh --s3 --gcs        # + cloud backends
+bash check_install.sh --conda --s3      # conda + S3
 
 # Pair with install_full.sh
-bash check_install.sh --venv                           # virtualenv (default)
-bash check_install.sh --conda                          # conda env
-bash check_install.sh --conda --name fno4d_s3 --s3     # conda + S3
-bash check_install.sh --venv  --torch 2.5.1 --s3 --gcs # pin torch + both cloud
+bash check_install_full.sh --venv                           # virtualenv (default)
+bash check_install_full.sh --conda                          # conda env
+bash check_install_full.sh --conda --name fno4d_s3 --s3     # conda + S3
+bash check_install_full.sh --venv  --torch 2.5.1 --s3 --gcs # pin torch + both cloud
 ```
 
 ### Verify the install
