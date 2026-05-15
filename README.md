@@ -6,7 +6,7 @@ state observables).
 
 The PyTorch FNO implementation in [neuraloperator-4d-2.0.0/](neuraloperator-4d-2.0.0/) is a
 **minimal fork** of the upstream [neuraloperator](https://github.com/neuraloperator/neuraloperator)
-library by Kossaifi, Kovachki, Li, et al. and all credit goes to authors [Credits & Attribution](#credits--attribution). 
+library by Kossaifi, Kovachki, Li, et al. and all credit goes to authors [Credits and Attribution](#credits-and-attribution). 
 
 The MLX port (heavy usage of Claude Sonnet 4.6) is following the PyTorch implementation as closely as possible, some constraints still exist and not every model can be ported as this moment (see [PORTING_NOTES.md](PORTING_NOTES.md)). Since no real physics tests and direct comparison to the PyTorch version is performed yet, consider the MLX **experimental** and should without out further verification only used to develop infra structure and other aspects localy on a Mac and not physics!
 
@@ -48,7 +48,7 @@ Two parallel training stacks are provided:
   - [`loc_libs` — data I/O helpers](#loc_libs--data-io-helpers)
 - [Tests](#tests)
 - [Porting status (PyTorch → MLX)](#porting-status-pytorch--mlx)
-- [Credits & Attribution](#credits--attribution)
+- [Credits and Attribution](#credits-and-attribution)
 
 ---
 
@@ -814,7 +814,7 @@ python -m pytest tests/ -v
 
 ---
 
-## Credits & Attribution
+## Credits and Attribution
 
 ### `neuraloperator` — PyTorch package
 
