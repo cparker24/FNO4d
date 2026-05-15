@@ -66,26 +66,45 @@ def _require_gcs_storage():
         )
 
 
-def _download_blob(blob, local_path, label: str = "") -> None:
-    """Download *blob* to *local_path* with a tqdm byte-level progress bar.
+def _download_blob(blob, local_path, label: str = "",
+                   show_progress=None) -> None:
+    """Download *blob* to *local_path* with an optional tqdm progress bar.
 
-    Falls back to a plain ``download_to_filename`` call when tqdm is not
-    installed (``pip install tqdm`` to enable the bar).
+    *show_progress* controls visibility:
+      None  — auto: bar shown in a terminal, silent when stdout is redirected
+              or there is no TTY (batch jobs, log files).  Uses tqdm.auto so
+              Jupyter notebooks get a widget bar automatically.
+      True  — always show the bar.
+      False — never show the bar.
+
+    Falls back to ``download_to_filename`` when tqdm is not installed.
     """
-    if _TQDM_AVAILABLE:
-        from tqdm import tqdm
-        with open(str(local_path), "wb") as fh:
-            with tqdm.wrapattr(
-                fh, "write",
-                total=blob.size,
-                desc=label or str(local_path.name if hasattr(local_path, "name") else local_path),
-                unit="B", unit_scale=True, unit_divisor=1024,
-                dynamic_ncols=True,
-                miniters=1,
-            ) as fout:
-                blob.download_to_file(fout)
-    else:
+    if not _TQDM_AVAILABLE:
         blob.download_to_filename(str(local_path))
+        return
+
+    # tqdm.auto picks the right renderer (notebook widget vs. text bar).
+    # disable=None  → tqdm checks sys.stderr.isatty(); silent when not a TTY
+    # disable=False → always show
+    # disable=True  → always hide
+    from tqdm.auto import tqdm
+    if show_progress is None:
+        disable = None
+    else:
+        disable = not show_progress
+
+    desc = label or str(local_path.name if hasattr(local_path, "name") else local_path)
+    with open(str(local_path), "wb") as fh:
+        with tqdm.wrapattr(
+            fh, "write",
+            total=blob.size,
+            desc=desc,
+            unit="B", unit_scale=True, unit_divisor=1024,
+            dynamic_ncols=True,
+            miniters=1,
+            disable=disable,
+        ) as fout:
+            blob.download_to_file(fout)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +149,8 @@ def parse_gcs_uri(gs_uri: str):
 
 
 def download_gcs_file(gs_uri: str, local_dir: str, key_file: str,
-                      overwrite: bool = False) -> str:
+                      overwrite: bool = False,
+                      show_progress=None) -> str:
     """Download a single GCS object to *local_dir*.
 
     The destination filename is the basename of the blob path.  If the local
@@ -181,13 +201,14 @@ def download_gcs_file(gs_uri: str, local_dir: str, key_file: str,
     size_mib = blob.size / 1024**2
     print(f"[GCS] downloading  gs://{bucket_name}/{blob_path}")
     print(f"[GCS]           →  {local_path}  ({size_mib:.1f} MiB)")
-    _download_blob(blob, local_path, label=filename)
+    _download_blob(blob, local_path, label=filename, show_progress=show_progress)
     print(f"[GCS] done")
     return str(local_path)
 
 
 def download_gcs_files(gs_uris: list, local_dir: str, key_file: str,
-                       overwrite: bool = False) -> list:
+                       overwrite: bool = False,
+                       show_progress=None) -> list:
     """Download multiple GCS objects to *local_dir*.
 
     Calls :func:`download_gcs_file` for each URI in order.
@@ -196,14 +217,16 @@ def download_gcs_files(gs_uris: list, local_dir: str, key_file: str,
         List of local paths (str) in the same order as *gs_uris*.
     """
     return [
-        download_gcs_file(uri, local_dir, key_file, overwrite=overwrite)
+        download_gcs_file(uri, local_dir, key_file, overwrite=overwrite,
+                          show_progress=show_progress)
         for uri in gs_uris
     ]
 
 
 def download_gcs_prefix(gs_prefix: str, local_dir: str, key_file: str,
                         overwrite: bool = False,
-                        preserve_structure: bool = True) -> list:
+                        preserve_structure: bool = True,
+                        show_progress=None) -> list:
     """Download all blobs under a GCS prefix (directory) to *local_dir*.
 
     Equivalent to ``gsutil -m cp -r gs://bucket/prefix/ local_dir/``.
@@ -271,7 +294,8 @@ def download_gcs_prefix(gs_prefix: str, local_dir: str, key_file: str,
                 continue
 
         print(f"[GCS] {blob.name}  →  {local_path}  ({blob.size / 1024**2:.1f} MiB)")
-        _download_blob(blob, local_path, label=Path(blob.name).name)
+        _download_blob(blob, local_path, label=Path(blob.name).name,
+                       show_progress=show_progress)
         local_paths.append(str(local_path))
 
     print(f"[GCS] prefix sync complete — {len(local_paths)} file(s) in {local_dir}")
@@ -453,7 +477,8 @@ def _rel_matches(rel: str, pattern: str) -> bool:
 
 def download_gcs_dir(gs_prefix: str, local_dir: str, key_file: str,
                      overwrite: bool = False,
-                     pattern: str = "**/*") -> list:
+                     pattern: str = "**/*",
+                     show_progress=None) -> list:
     """Download a GCS prefix (directory) to a local directory.
 
     Symmetric counterpart to :func:`upload_gcs_dir`.  The prefix-relative
@@ -543,7 +568,7 @@ def download_gcs_dir(gs_prefix: str, local_dir: str, key_file: str,
                 continue
 
         print(f"[GCS]   {rel}  ({size_mib:.1f} MiB)")
-        _download_blob(blob, local_path, label=rel)
+        _download_blob(blob, local_path, label=rel, show_progress=show_progress)
         local_paths.append(str(local_path))
 
     print(f"[GCS] download complete — {len(local_paths)} file(s) in {local_dir}/")

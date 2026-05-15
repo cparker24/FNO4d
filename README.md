@@ -156,7 +156,7 @@ FNO4d/
 bash install.sh                 # default: always creates/reuses venv/
 bash install.sh --conda         # opt-in: install into active named conda env
 bash install.sh --s3            # + AWS S3 / S3-compatible storage (s3fs, boto3)
-bash install.sh --gcs           # + Google Cloud Storage (gcsfs, google-cloud-storage)
+bash install.sh --gcs           # + Google Cloud Storage (gcsfs, google-cloud-storage, tqdm)
 bash install.sh --s3 --gcs      # + both cloud backends
 ```
 
@@ -169,7 +169,7 @@ Flags compose freely, e.g. `bash install.sh --conda --s3 --gcs`.
 | `bash install.sh` | Creates (or reuses) `venv/` in the repo root with `--system-site-packages`. Works in a bare shell, inside a conda env, or in a Docker container — packages already installed in the parent Python are visible without reinstalling. |
 | `bash install.sh --conda` | Installs directly into the **currently active named conda env** (no venv created). Refused if the active env is `base` or no conda env is active. |
 | `bash install.sh --s3` | Also installs `requirements-s3.txt`: `s3fs` + `boto3` for S3/S3-compatible access. |
-| `bash install.sh --gcs` | Also installs `requirements-gcs.txt`: `gcsfs` + `google-cloud-storage` for GCS access. |
+| `bash install.sh --gcs` | Also installs `requirements-gcs.txt`: `gcsfs` + `google-cloud-storage` + `tqdm` for GCS access. |
 
 > **conda base:** the `base` env is never modified directly. With `bash install.sh`
 > a venv is created that inherits base's packages via `--system-site-packages`.
@@ -212,7 +212,7 @@ Flags may be freely combined.  Run `bash install_full.sh --help` for details.
 | `--name NAME` | Override the environment name/path (`venv_fno4d` or `fno4d` by default). |
 | `--torch VERSION` | Pin a specific PyTorch version, e.g. `--torch 2.5.1`. Default: latest available for the detected CUDA / platform. `torchvision` is resolved automatically. |
 | `--s3` | Also installs `requirements-s3.txt`: `s3fs` + `boto3`. |
-| `--gcs` | Also installs `requirements-gcs.txt`: `gcsfs` + `google-cloud-storage`. |
+| `--gcs` | Also installs `requirements-gcs.txt`: `gcsfs` + `google-cloud-storage` + `tqdm`. |
 
 > The environment must not already exist — the script exits with an error if it
 > does, so accidental overwrites are impossible.
@@ -461,7 +461,7 @@ or the corresponding requirements files:
 | Backend | Install flag | Requirements file | Packages |
 |---|---|---|---|
 | AWS S3 / S3-compatible | `--s3` | `requirements-s3.txt` | `s3fs`, `boto3` |
-| Google Cloud Storage | `--gcs` | `requirements-gcs.txt` | `gcsfs`, `google-cloud-storage` |
+| Google Cloud Storage | `--gcs` | `requirements-gcs.txt` | `gcsfs`, `google-cloud-storage`, `tqdm` |
 
 Once installed, `read_3d_root.py` and `read_3d_hdf5.py` accept a `storage_options`
 dict forwarded directly to `uproot`, enabling transparent remote I/O via fsspec.
@@ -483,7 +483,7 @@ data = read_3d_data(
 )
 ```
 
-The packages `s3fs`, `boto3`, `gcsfs`, and `google-cloud-storage` are
+The packages `s3fs`, `boto3`, `gcsfs`, `google-cloud-storage`, and `tqdm` are
 installed only when the corresponding `--s3` / `--gcs` flag is passed to
 `install.sh` or `install_full.sh` (or the matching requirements file is
 installed manually).

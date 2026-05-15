@@ -29,7 +29,10 @@ gcs_output_prefix: gs://test_fno/runs/run01
 
 # --- local data cache ---
 local_data_dir: ../data     # directory where downloaded .root files are stored
-overwrite_cache: false     # set to true to force re-download even if file exists
+overwrite_cache: false      # set to true to force re-download even if file exists
+gcs_show_progress: null     # null = auto (bar in terminal, silent in batch/redirected output)
+                            # true  = always show bar
+                            # false = never show bar
 
 # --- output ---
 odir: ./out                # logs, metrics, training curves

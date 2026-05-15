@@ -102,6 +102,7 @@ gcs_key_file        = cfg['gcs_key_file']
 local_data_dir      = cfg.get('local_data_dir', './data')
 overwrite_cache     = cfg.get('overwrite_cache', False)
 gcs_output_prefix   = cfg.get('gcs_output_prefix', None)
+gcs_show_progress   = cfg.get('gcs_show_progress', None)
 
 # ---------------------------------------------------------------------------
 # ensure output directories exist
@@ -160,7 +161,8 @@ log(f'normalization:     {norm_cfg}')
 log(f'Downloading {len(input_files)} file(s) from GCS …')
 t_dl = perf_counter()
 local_files = download_gcs_files(
-    input_files, local_data_dir, gcs_key_file, overwrite=overwrite_cache
+    input_files, local_data_dir, gcs_key_file, overwrite=overwrite_cache,
+    show_progress=gcs_show_progress,
 )
 log(f'Download complete in {perf_counter() - t_dl:.1f}s')
 for gs_uri, local_path in zip(input_files, local_files):

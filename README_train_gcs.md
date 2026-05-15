@@ -39,9 +39,11 @@ pip install -r requirements-gcs.txt
 pip install -e './loc_libs[gcs]'
 ```
 
-This installs `gcsfs` (fsspec driver) and `google-cloud-storage` (download API).
-Both packages are required for the download mode; only `gcsfs` is needed for
-streaming, but installing both keeps the two modes interchangeable.
+This installs `gcsfs` (fsspec driver), `google-cloud-storage` (download API),
+and `tqdm` (byte-level progress bar for downloads).
+Both `gcsfs` and `google-cloud-storage` are required for download mode; only
+`gcsfs` is needed for streaming, but installing all three together keeps the
+two modes interchangeable.
 
 ### 2 — Service-account key file
 
@@ -149,6 +151,8 @@ gcs_key_file: /path/to/service_account.json
 # --- local cache (new keys for download mode) ---
 local_data_dir: ./data      # directory where .root files are stored locally
 overwrite_cache: false      # true = always re-download even if the file exists
+gcs_show_progress: null     # null = auto (bar in terminal, silent in batch/redirect)
+                            # true  = always show bar | false = never show bar
 
 # --- input data ---
 input_files:
@@ -180,6 +184,7 @@ cached path typically saves minutes per run on subsequent training iterations.
 | `gcs_output_prefix` | both | no | `null` | Upload `model_dir` and `odir` here after training (e.g. `gs://my-bucket/runs/run01`) |
 | `local_data_dir` | download only | no | `./data` | Local directory for downloaded files |
 | `overwrite_cache` | download only | no | `false` | Force re-download even if cached file exists |
+| `gcs_show_progress` | download only | no | `null` | Progress bar: `null` = auto (shown in terminal / Jupyter, silent in batch); `true` = always; `false` = never |
 
 `input_dir` is **not** used by either GCS mode — `input_files` entries are
 full `gs://` URIs and are passed directly to `read_3d_data` (streaming) or
@@ -421,19 +426,21 @@ data = read_3d_data('gs://my-bucket/data/file.root', storage_options=opts)
 
 # --- download specific files ---
 local_paths = download_gcs_files(
-    gs_uris   = ['gs://my-bucket/data/file1.root'],
-    local_dir = './data',
-    key_file  = '/path/to/key.json',
-    overwrite = False,
+    gs_uris       = ['gs://my-bucket/data/file1.root'],
+    local_dir     = './data',
+    key_file      = '/path/to/key.json',
+    overwrite     = False,
+    show_progress = None,   # None = auto (terminal/Jupyter); True/False = force on/off
 )
 
 # --- download a directory (with optional pattern filter) ---
 local_paths = download_gcs_dir(
-    gs_prefix = 'gs://my-bucket/runs/run01/checkpoints',
-    local_dir = './checkpoints',
-    key_file  = '/path/to/key.json',
-    overwrite = False,
-    pattern   = '**/*',          # glob relative to gs_prefix; default = everything
+    gs_prefix     = 'gs://my-bucket/runs/run01/checkpoints',
+    local_dir     = './checkpoints',
+    key_file      = '/path/to/key.json',
+    overwrite     = False,
+    pattern       = '**/*',   # glob relative to gs_prefix; default = everything
+    show_progress = None,
 )
 
 # --- download a directory (flat layout, no pattern filter) ---
@@ -443,6 +450,7 @@ local_paths = download_gcs_prefix(
     key_file           = '/path/to/key.json',
     overwrite          = False,
     preserve_structure = True,   # False = flat (basename only)
+    show_progress      = None,
 )
 
 # --- upload a single file ---
