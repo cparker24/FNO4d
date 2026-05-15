@@ -51,8 +51,14 @@ GCS authentication uses a **service-account JSON key file**.
 
 1. In the Google Cloud Console, navigate to
    **IAM & Admin → Service Accounts → Create service account**.
-2. Grant the account the **Storage Object Viewer** role on the target bucket
-   (or project-wide if several buckets are used).
+2. Grant the account the **Storage Object Viewer** role.  There are two ways:
+   - **Project-wide** (IAM & Admin → IAM): the account can read from all
+     buckets in the project.
+   - **Bucket-level** (Cloud Storage → Buckets → *bucket* → Permissions →
+     Grant access): the account is restricted to that specific bucket.
+     In many organisation setups the service account does **not** receive
+     project-wide roles automatically — you must add it explicitly to each
+     bucket it needs to access.
 3. Under **Keys → Add key → Create new key**, select **JSON** and download the
    file.  Keep it outside the repo and never commit it to git.
 
@@ -67,6 +73,13 @@ GCS authentication uses a **service-account JSON key file**.
 > | Streaming (read-only) | `roles/storage.objectViewer` |
 > | Download (read-only) | `roles/storage.objectViewer` |
 > | List bucket contents (optional) | `roles/storage.objectViewer` (includes `storage.objects.list`) |
+>
+> **Project-wide vs bucket-level access** — In some Google Cloud organisations
+> the service account is granted roles only on specific buckets, not
+> project-wide.  If access to a bucket is unexpectedly denied, check the
+> bucket's own **Permissions** tab (Cloud Storage → Buckets → *bucket* →
+> Permissions) and add the service account there with the required role even
+> if it already appears in the project-level IAM policy.
 
 ---
 
@@ -303,6 +316,13 @@ read:
 | Upload (write) | `roles/storage.objectCreator` |
 | Upload + overwrite | `roles/storage.objectUser` (= Creator + delete) |
 | Full read + write | `roles/storage.objectAdmin` |
+
+These roles must be granted on the **destination bucket** — either via the
+project-level IAM policy (IAM & Admin → IAM) or directly on the bucket
+(Cloud Storage → Buckets → *bucket* → Permissions → Grant access).  In
+organisations where service accounts do not receive project-wide roles
+automatically, the bucket-level grant is required even if the account can
+read from other buckets.
 
 A separate upload-only key can be used alongside the read-only download key
 if the training machine and the storage destination are in different trust
@@ -581,7 +601,19 @@ python -c "from pathlib import Path; print(Path('/your/key.json').exists())"
 ### `google.api_core.exceptions.Forbidden` / 403
 
 The service account lacks permission on the bucket.  Verify it has at least
-the **Storage Object Viewer** (`roles/storage.objectViewer`) role.
+the **Storage Object Viewer** (`roles/storage.objectViewer`) role for reads,
+or **Storage Object Creator / User** for uploads.
+
+Check **both** permission levels — project-wide and bucket-level:
+- Project-wide: GCP Console → IAM & Admin → IAM → find the service-account
+  email and confirm the role appears there.
+- Bucket-level: GCP Console → Cloud Storage → Buckets → *bucket* →
+  Permissions → confirm the service-account email is listed.
+
+In many organisation setups a service account does **not** automatically
+inherit project-wide roles.  If the account is missing from the bucket's own
+Permissions tab, add it there explicitly with the required role — a
+project-level entry alone is not enough in those configurations.
 
 ### `FileNotFoundError: gs://…`
 
