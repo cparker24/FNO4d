@@ -34,6 +34,7 @@ Two parallel training stacks are provided:
   - [Edit parameters](#edit-parameters)
   - [PyTorch path (Linux / Lambda)](#pytorch-path-linux--lambda)
   - [MLX path (Mac Silicon)](#mlx-path-mac-silicon)
+  - [GCS training (cloud data)](#gcs-training-cloud-data)
   - [Inference / apply](#inference--apply)
   - [Evaluation](#evaluation)
 - [Model evaluation](#model-evaluation)
@@ -55,7 +56,8 @@ Two parallel training stacks are provided:
 
 ```
 FNO4d/
-├── README_train.md              # PyTorch training script — parameters, data format, outputs
+├── README_train.md              # training scripts — parameters, data format, outputs
+├── README_train_gcs.md          # GCS training — cloud data, streaming vs download, IAM setup
 ├── README_eval.md               # evaluation / inference scripts — UI controls, outputs, examples
 ├── README_eval_metric.md        # ModelEval metric suite — math, diagnostics, API reference
 ├── README_mlx.md                # MLX port overview — setup, differences from PyTorch stack
@@ -100,13 +102,14 @@ FNO4d/
 │   ├── NormFn.py                # older 3-channel normalizers (pre-NormFn3d, backward compat)
 │   ├── README_NormFn3d.md       # extended docs for the NormFn3d normalizer family
 │   ├── norm_utils.py            # stateful Normalizer wrapper (fit/transform/inverse/save/load)
+│   ├── gcs_utils.py             # GCS helpers: streaming storage_options + file download (opt-in)
 │   ├── skinnycontour.py         # skinny-contour CDF overlay utilities
 │   ├── cont.py                  # low-level contour mask helpers (backend for skinnycontour)
 │   ├── contour_v_plot.py        # velocity-channel contour plotting
 │   ├── plot_imshow.py           # imshow-based field snapshot plotting helpers
 │   └── model_eval.py            # ModelEval — full metric suite (nRMSE, fRMSE, MELR, WLR, …)
 │
-└── train/                       # training entry points and evaluation notebooks
+├── train/                       # training entry points and evaluation notebooks
     ├── test_train.py            # PyTorch training script (hardcoded params)
     ├── test_train.ipynb         # PyTorch training notebook
     ├── test_train_mlx.py        # MLX training script (hardcoded params, Mac)
@@ -126,6 +129,14 @@ FNO4d/
     ├── eval_model_test_cont_mlx.py    # MLX eval — skinnycontour CDF contours
     ├── eval_model_test_metric_torch.py # PyTorch eval — full ModelEval metric suite
     └── eval_model_test_metric_mlx.py   # MLX eval — full ModelEval metric suite
+│
+└── train_gcs/                   # GCS-backed training scripts (data stays in the bucket)
+    ├── test_train_yaml_norm_gcs_stream.py     # PyTorch — stream directly from gs://
+    ├── test_train_mlx_yaml_norm_gcs_stream.py # MLX — stream directly from gs://
+    ├── test_train_yaml_norm_gcs_download.py   # PyTorch — download to local_data_dir first
+    ├── test_train_mlx_yaml_norm_gcs_download.py # MLX — download to local_data_dir first
+    ├── config_gcs_stream.yaml   # example config for streaming scripts
+    └── config_gcs_download.yaml # example config for download scripts
 ```
 
 ---
@@ -477,6 +488,10 @@ installed only when the corresponding `--s3` / `--gcs` flag is passed to
 `install.sh` or `install_full.sh` (or the matching requirements file is
 installed manually).
 
+For GCS specifically, dedicated end-to-end training scripts are available in
+`train_gcs/` — they handle authentication and the choice between streaming
+and downloading automatically.  See [README_train_gcs.md](README_train_gcs.md).
+
 ---
 
 ## Training
@@ -534,6 +549,34 @@ python test_train_mlx.py
 ```
 
 Output: `log_mlx.log`, `best_model.safetensors`
+
+### GCS training (cloud data)
+
+When ROOT files live in Google Cloud Storage, the `train_gcs/` scripts read
+them directly without requiring a local copy.  Two modes are available:
+
+| Mode | When to use |
+|------|------------|
+| **Streaming** | One-off runs, low-disk instances — no data lands on disk |
+| **Download** | Repeated runs on the same files — downloads once, reuses the local cache |
+
+```bash
+cd train_gcs/
+
+# edit config_gcs_stream.yaml: set gcs_key_file and gs:// input_files
+python test_train_yaml_norm_gcs_stream.py --config config_gcs_stream.yaml     # PyTorch
+python test_train_mlx_yaml_norm_gcs_stream.py --config config_gcs_stream.yaml # MLX
+
+# edit config_gcs_download.yaml: set gcs_key_file, local_data_dir, gs:// input_files
+python test_train_yaml_norm_gcs_download.py --config config_gcs_download.yaml     # PyTorch
+python test_train_mlx_yaml_norm_gcs_download.py --config config_gcs_download.yaml # MLX
+```
+
+GCS packages must be installed first (`bash install.sh --gcs`), and a
+service-account JSON key file is required.  Full setup instructions and all
+new YAML keys are documented in **[README_train_gcs.md](README_train_gcs.md)**.
+
+---
 
 ### Inference / apply
 
@@ -729,6 +772,14 @@ from loc_libs.read_3d_hdf5  import convert_root_to_hdf5, read_3d_data_hdf5
 from loc_libs.root_pytorch_loader import make_dataloaders
 from loc_libs.parse_training_log  import plot_training_log
 from loc_libs.skinnycontour       import find_skinny_contours
+
+# GCS helpers (requires pip install -r requirements-gcs.txt or --gcs flag)
+from loc_libs.gcs_utils import get_gcs_storage_options  # streaming via fsspec
+from loc_libs.gcs_utils import download_gcs_files        # download specific files
+from loc_libs.gcs_utils import download_gcs_dir          # download a GCS prefix (with pattern filter)
+from loc_libs.gcs_utils import download_gcs_prefix       # download a GCS prefix (flat or structured)
+from loc_libs.gcs_utils import upload_gcs_file           # upload a single file
+from loc_libs.gcs_utils import upload_gcs_dir            # upload a local directory (with pattern filter)
 ```
 
 `read_3d_data` returns a dict with:
