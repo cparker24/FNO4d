@@ -6,3 +6,5 @@ __pycache__/
 *.code-workspace
 train/*.json
 *.svg
+train/*.pt
+train/*.pkl

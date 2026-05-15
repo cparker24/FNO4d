@@ -32,7 +32,6 @@ weight_decay = 1e-4
 # ---------------------------------------------------------------------------
 import sys
 import gc
-import numpy as np
 import mlx.core as mx
 import mlx.optimizers as optim_mlx
 from time import perf_counter
@@ -96,9 +95,6 @@ log(f'nevents (constrained by input file): {arr.shape[0]}')
 n_train = int(arr.shape[0] * train_ratio)
 data_train = arr[:n_train]
 data_verify = arr[n_train:]
-
-np.random.shuffle(data_train)
-np.random.shuffle(data_verify)
 
 log(f'shapes train:  {data_train.shape}')
 log(f'shapes verify: {data_verify.shape}')

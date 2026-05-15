@@ -4,7 +4,7 @@
 # training parameters
 # ---------------------------------------------------------------------------
 odir = './'
-input_dir = './'
+input_dir = '/Users/du8478/FNO_Hydro_Data/flat'
 input_files = ['dAu_25ev_mb.root']
 
 n_epochs = 1
@@ -12,7 +12,7 @@ batch_size = 1
 hidden_channels = 16
 n_modes = [32, 32, 16, 16]
 
-nevents_in = -1
+nevents_in = 10
 log_directly = True
 checkpoint_freq = None
 train_ratio = 0.8
@@ -27,7 +27,6 @@ weight_decay = 1e-4
 # ---------------------------------------------------------------------------
 import sys
 import gc
-import numpy as np
 import torch
 from time import perf_counter
 from torch.utils.data import DataLoader
@@ -91,9 +90,6 @@ log(f'nevents (constrained by input file): {arr.shape[0]}')
 n_train = int(arr.shape[0] * train_ratio)
 data_train = arr[:n_train]
 data_verify = arr[n_train:]
-
-np.random.shuffle(data_train)
-np.random.shuffle(data_verify)
 
 log(f'shapes train:  {data_train.shape}')
 log(f'shapes verify: {data_verify.shape}')

@@ -1,0 +1,198 @@
+#!/usr/bin/env python
+
+# ---------------------------------------------------------------------------
+# MLX FNO training — parameters loaded from a YAML config file.
+# Usage: python test_train_mlx_yaml.py --config config_train_mlx.yaml
+# ---------------------------------------------------------------------------
+
+import argparse
+import yaml
+import sys
+import gc
+import mlx.core as mx
+import mlx.optimizers as optim_mlx
+from time import perf_counter
+from torch.utils.data import DataLoader
+
+from neuralop_mlx.models import FNO
+from neuralop_mlx import Trainer, LpLoss, H1Loss, AdamW
+from neuralop_mlx.utils import count_model_params
+
+sys.path.append('../loc_libs')
+from read_3d_root import read_3d_data
+from datasets import FluidDatasetMLX
+from memory_utils import calculate_model_memory
+from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint
+from parse_training_log import TrainingHistory
+
+# ---------------------------------------------------------------------------
+# load config
+# ---------------------------------------------------------------------------
+parser = argparse.ArgumentParser(description='Train FNO (MLX) from YAML config')
+parser.add_argument('--config', default='config_test_train.yaml', metavar='FILE',
+                    help='path to YAML configuration file (default: config_test_train.yaml)')
+args = parser.parse_args()
+
+with open(args.config) as f:
+    cfg = yaml.safe_load(f)
+
+def _slice(val):
+    return slice(None) if val is None else slice(*val)
+
+odir            = cfg['odir']
+input_dir       = cfg['input_dir']
+input_files     = cfg['input_files']
+n_epochs        = cfg['n_epochs']
+batch_size      = cfg['batch_size']
+hidden_channels = cfg['hidden_channels']
+n_modes         = cfg['n_modes']
+nevents_in      = cfg.get('nevents_in', 10)
+log_directly    = cfg.get('log_directly', True)
+checkpoint_freq = cfg.get('checkpoint_freq', None)
+train_ratio     = cfg.get('train_ratio', 0.8)
+xyslice         = _slice(cfg.get('xyslice', [None, -1]))
+tauslice        = _slice(cfg.get('tauslice', [None, -1]))
+lr              = cfg['lr']
+weight_decay    = cfg.get('weight_decay', 1e-4)
+
+# ---------------------------------------------------------------------------
+# logging
+# ---------------------------------------------------------------------------
+log = RunLog(f'{odir}/training_mlx.log' if log_directly else None)
+
+t0 = perf_counter()
+
+# ---------------------------------------------------------------------------
+# configuration summary
+# ---------------------------------------------------------------------------
+log(f'config:          {args.config}')
+log(f'input dir:       {input_dir}')
+log(f'input files:     {input_files}')
+log(f'n_epochs:        {n_epochs}')
+log(f'batch_size:      {batch_size}')
+log(f'hidden_channels: {hidden_channels}')
+log(f'checkpoint_freq: {checkpoint_freq}')
+log(f'n_modes:         {n_modes}')
+log(f'train_ratio:     {train_ratio}')
+log(f'xyslice:         {xyslice}')
+log(f'tauslice:        {tauslice}')
+log(f'log_directly:    {log_directly}')
+log(f'nevents(in):     {nevents_in}')
+log(f'AdamW: lr:       {lr}')
+log(f'AdamW: weight_decay: {weight_decay}')
+
+# ---------------------------------------------------------------------------
+# load data
+# ---------------------------------------------------------------------------
+log(f'Events called for {nevents_in}')
+
+arr_data = [read_3d_data(f'{input_dir}/{f}', nevents=nevents_in, local_rank=None) for f in input_files]
+
+if len(arr_data) == 0:
+    raise ValueError("No data found in the specified input files.")
+
+log('Data parameters from input file:')
+for key in arr_data[0].keys():
+    if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
+        log(f'  {key}: {arr_data[0][key]}')
+
+arr = arr_data[0]['arr']
+arr = arr[:, :, xyslice, xyslice, tauslice, :]
+del arr_data
+gc.collect()
+
+log(f'nevents (constrained by input file): {arr.shape[0]}')
+
+n_train = int(arr.shape[0] * train_ratio)
+data_train = arr[:n_train]
+data_verify = arr[n_train:]
+
+log(f'shapes train:  {data_train.shape}')
+log(f'shapes verify: {data_verify.shape}')
+
+device = 'gpu'
+log(f'Using device: {device} (MLX Metal)')
+
+# ---------------------------------------------------------------------------
+# datasets and loaders
+# ---------------------------------------------------------------------------
+dataset_train = FluidDatasetMLX(data_train)
+dataset_test  = FluidDatasetMLX(data_verify)
+
+train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
+
+test_resolutions = [100]
+test_batch_sizes = [10]
+test_loaders = {}
+for res, test_bsize in zip(test_resolutions, test_batch_sizes):
+    log(f'res {res}')
+    test_loaders[res] = DataLoader(
+        dataset_test,
+        batch_size=test_bsize,
+        shuffle=False,
+        num_workers=0,
+        pin_memory=False,
+        persistent_workers=False,
+    )
+gc.collect()
+
+# ---------------------------------------------------------------------------
+# model
+# ---------------------------------------------------------------------------
+model = FNO(
+    in_channels=4,
+    out_channels=4,
+    n_modes=n_modes,
+    hidden_channels=hidden_channels,
+    projection_channel_ratio=2,
+)
+
+memory_usage = calculate_model_memory(model, count_fn=count_model_params)
+log(f"Model memory usage: {memory_usage:.2f} MB")
+
+# ---------------------------------------------------------------------------
+# optimizer, losses, trainer
+# ---------------------------------------------------------------------------
+optimizer = AdamW(lr=lr, weight_decay=weight_decay)
+scheduler = optim_mlx.cosine_decay(lr, T_max := 30)
+
+l2loss = LpLoss(d=4, p=2)
+h1loss = H1Loss(d=4)
+train_loss  = h1loss
+eval_losses = {'h1': h1loss, 'l2': l2loss}
+
+trainer = Trainer(
+    model=model,
+    n_epochs=n_epochs,
+    device=device,
+    wandb_log=False,
+    eval_interval=2,
+    use_distributed=False,
+    verbose=True,
+)
+
+history = TrainingHistory()
+patch_trainer_logging(trainer, log, history=history)
+
+if checkpoint_freq is not None and checkpoint_freq > 0:
+    patch_trainer_checkpoint(trainer, Trainer, checkpoint_freq, odir)
+
+# ---------------------------------------------------------------------------
+# train
+# ---------------------------------------------------------------------------
+trainer.train(
+    train_loader=train_loader,
+    test_loaders=test_loaders,
+    optimizer=optimizer,
+    scheduler=scheduler,
+    regularizer=False,
+    save_dir=odir,
+    save_best='100_l2',
+    training_loss=train_loss,
+    eval_losses=eval_losses,
+)
+
+history.save(f'{odir}/metrics_mlx.json')
+history.plot(save_path=f'{odir}/training_curves_mlx.svg', title='FNO Training (MLX)')
+log(f'metrics   → {odir}/metrics_mlx.json')
+log(f'curves    → {odir}/training_curves_mlx.svg')

@@ -1,0 +1,36 @@
+# ---------------------------------------------------------------------------
+# FNO training config — shared by test_train_yaml.py and test_train_mlx_yaml.py
+# Usage:
+#   python test_train_yaml.py     [--config config_test_train.yaml]
+#   python test_train_mlx_yaml.py [--config config_test_train.yaml]
+# ---------------------------------------------------------------------------
+
+# --- output ---
+odir: ./
+
+# --- input data ---
+input_dir: /Users/du8478/FNO_Hydro_Data/flat
+input_files:
+  - dAu_25ev_mb.root
+nevents_in: 10          # -1 = all events in file
+
+# --- data preparation ---
+train_ratio: 0.8
+xyslice:  [null, -1]    # slice(None, -1) — drop last spatial bin
+tauslice: [null, -1]    # slice(None, -1) — drop last tau bin
+
+# --- model ---
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]   # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 1
+batch_size: 1
+checkpoint_freq: null   # save checkpoint every N epochs; null = disabled
+
+# --- optimizer ---
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true      # mirror output to training.log / training_mlx.log
