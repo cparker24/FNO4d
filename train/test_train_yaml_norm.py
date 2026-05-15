@@ -40,6 +40,10 @@ from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoi
 from parse_training_log import TrainingHistory
 from norm_utils import build_normalizer
 
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='torch')
+warnings.filterwarnings('ignore', category=UserWarning, module='neuralop')
+
 # ---------------------------------------------------------------------------
 # load config
 # ---------------------------------------------------------------------------

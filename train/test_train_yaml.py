@@ -26,6 +26,10 @@ from memory_utils import calculate_model_memory, reset_peak_memory, log_peak_mem
 from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint, save_last_checkpoint
 from parse_training_log import TrainingHistory
 
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='torch')
+warnings.filterwarnings('ignore', category=UserWarning, module='neuralop')
+
 # ---------------------------------------------------------------------------
 # load config
 # ---------------------------------------------------------------------------
