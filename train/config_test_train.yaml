@@ -15,6 +15,12 @@ input_files:
   - dAu_25ev_mb.root
 nevents_in: 10          # -1 = all events in file
 
+# --- normalisation (test_train_yaml_norm.py / test_train_mlx_yaml_norm.py only) ---
+# grid params (tau_min, dtau, eta_min, deta) are read from the data file automatically
+normalization:
+  name: none            # none | etau75_3d | etau75_eta_3d | etau75_eta_shape_3d | cosh_etau75_3d
+  # alpha: 1.0          # exponent for cosh_etau75_3d only (default 1.0)
+
 # --- data preparation ---
 train_ratio: 0.8
 xyslice:  [null, -1]    # slice(None, -1) — drop last spatial bin

@@ -9,3 +9,4 @@ train/*.json
 train/*.pt
 train/*.pkl
 train/*/*.json
+train/*/*.npz

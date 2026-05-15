@@ -5,7 +5,14 @@ data stored in ROOT files. The model learns to evolve the hydrodynamic fields
 (energy density, transverse velocities, longitudinal velocity) from an initial
 τ-slice forward in proper time.
 
-Four training scripts are provided — two backends × two configuration styles:
+> **Setup and environment** — see the main [README.md](README.md) for installation
+> instructions, environment activation, pre-flight checks, and cloud storage setup.
+
+---
+
+## Training scripts
+
+Six training scripts are provided — two backends × three configuration styles:
 
 | Script | Config style | Package | Backend | Target |
 |--------|-------------|---------|---------|--------|
@@ -13,30 +20,12 @@ Four training scripts are provided — two backends × two configuration styles:
 | `test_train_mlx.py` | hardcoded at top | `neuralop_mlx` | Metal (Apple Silicon) | Mac M-series |
 | `test_train_yaml.py` | YAML file | `neuralop` (local 4D fork) | CUDA / CPU | Lambda / HPC |
 | `test_train_mlx_yaml.py` | YAML file | `neuralop_mlx` | Metal (Apple Silicon) | Mac M-series |
+| `test_train_yaml_norm.py` | YAML file + normalisation | `neuralop` (local 4D fork) | CUDA / CPU | Lambda / HPC |
+| `test_train_mlx_yaml_norm.py` | YAML file + normalisation | `neuralop_mlx` | Metal (Apple Silicon) | Mac M-series |
 
----
-
-## Environment
-
-```bash
-conda activate fno_env_mlx
-```
-
-All scripts require the local helper library `loc_libs`.
-
----
-
-## Setup
-
-Install `loc_libs` once so all modules are importable everywhere:
-
-```bash
-pip install -e ./loc_libs
-```
-
-If `loc_libs` is **not** installed the scripts fall back to
-`sys.path.append('../loc_libs')` — no further action needed when running from
-the `train/` directory.
+The `_norm` scripts are drop-in replacements for the plain YAML scripts —
+they accept the same config file and add an optional `normalization:` block.
+With `name: none` (the default) their behaviour is identical to the plain YAML scripts.
 
 ---
 
@@ -60,11 +49,11 @@ Notebook equivalents: `test_train.ipynb`, `test_train_mlx.ipynb`.
 
 ### YAML-config scripts
 
-Both YAML scripts share a single config file:
+All YAML scripts share a single config file:
 
 ```bash
 cd train/
-mkdir models          # model_dir must exist before running
+mkdir checkpoints          # model_dir must exist before running
 
 # PyTorch (CUDA / CPU)
 python test_train_yaml.py                               # uses config_test_train.yaml
@@ -73,6 +62,10 @@ python test_train_yaml.py --config my_run.yaml          # override
 # MLX (Apple Silicon Metal)
 python test_train_mlx_yaml.py                          # uses config_test_train.yaml
 python test_train_mlx_yaml.py --config my_run.yaml     # override
+
+# With normalisation (see Data normalisation section below)
+python test_train_yaml_norm.py --config my_run.yaml
+python test_train_mlx_yaml_norm.py --config my_run.yaml
 ```
 
 ---
@@ -135,6 +128,7 @@ passed via `--config`).
 | `log_directly` | `True` | mirror all output to a log file (see Logging) |
 | `xyslice` | `[null, -1]` | YAML form of `slice(None, -1)` — drop last spatial bin |
 | `tauslice` | `[null, -1]` | YAML form of `slice(None, -1)` — drop last tau bin |
+| `normalization` | `{name: none}` | data normalisation (see below); `_norm` scripts only |
 
 `test_resolutions` is not a parameter — it is derived automatically from
 `arr.shape[2]` (the x-dimension of the loaded, sliced data) so the eval metric
@@ -148,6 +142,69 @@ if it does not — before any data is loaded:
 ```
 FileNotFoundError: model_dir './models' does not exist — please create it before running.
 ```
+
+---
+
+## Data normalisation (`_norm` scripts only)
+
+The `_norm` scripts normalise the raw energy-density field before it reaches the
+network and save a `normalizer.npz` file alongside the model so predictions can
+be inverted back to physical units.
+
+Normalisation is always fit on the **training split only**; the same parameters
+are then applied to the validation split — preventing data leakage from
+data-driven schemes.
+
+### Selecting a normalisation
+
+Add a `normalization:` block to the YAML config:
+
+```yaml
+normalization:
+  name: none              # default — identity, no change in behaviour
+```
+
+Available names:
+
+| name | transform | notes |
+|------|-----------|-------|
+| `none` | identity | default; identical to non-`_norm` scripts |
+| `etau75_3d` | ed → ed^0.75 · τ | tau scaling only; motivated by ideal Bjorken flow |
+| `etau75_eta_3d` | ed → (ed^0.75 · τ) / ref[η, τ] | data-driven per-(η,τ) rescaling; ref computed from training data |
+| `etau75_eta_shape_3d` | ed → (ed^0.75 · τ) / shape\_ref[η, τ] | shape-only η correction; preserves Bjorken tau evolution |
+| `cosh_etau75_3d` | ed → (ed · cosh(η)^α)^0.75 · τ | analytic η correction; no training data needed |
+
+For the `cosh_etau75_3d` variant, set the exponent via:
+
+```yaml
+normalization:
+  name: cosh_etau75_3d
+  alpha: 1.0              # default 1.0; physically motivated alternatives: 4/3
+```
+
+Grid parameters (`tau_min`, `dtau`, `eta_min`, `deta`) are read automatically
+from the data file — they do not need to be repeated in the YAML.
+
+### Saved normalizer
+
+After training, `{model_dir}/normalizer.npz` contains everything needed to
+invert predictions:
+
+```python
+from norm_utils import Normalizer
+
+normalizer = Normalizer.load('checkpoints/normalizer.npz')
+pred_physical = normalizer.inverse(model_output_array)
+```
+
+The `.npz` stores: `name`, `tau_min`, `dtau`, `alpha`, and (for data-driven
+schemes) the `ref` array computed from training data.
+
+### Normalisation math
+
+See `loc_libs/NormFn3d.py` for full derivations and docstrings. All families
+operate only on feature 0 (energy density `ed`); velocity channels are passed
+through unchanged.
 
 ---
 
@@ -193,8 +250,8 @@ y  : τ-slices 1 … n_tau−1                       →  shape (4, nx, ny, n_et
 
 | class | used by | return type |
 |-------|---------|-------------|
-| `FluidDataset` | `test_train.py`, `test_train_yaml.py` | `torch.FloatTensor` |
-| `FluidDatasetMLX` | `test_train_mlx.py`, `test_train_mlx_yaml.py` | `numpy.float32` (MLX Trainer converts to `mx.array`) |
+| `FluidDataset` | PyTorch scripts | `torch.FloatTensor` |
+| `FluidDatasetMLX` | MLX scripts | `numpy.float32` (MLX Trainer converts to `mx.array`) |
 
 ---
 
@@ -281,6 +338,15 @@ When `save_last=True` (default), a full resumable checkpoint is written to
 `model_dir` after the last epoch. The model architecture and hyperparameters
 are **not** stored in the checkpoint — the same config (or parameter block)
 used for the original run must be used when resuming.
+
+For `_norm` scripts, also reload the normalizer before constructing datasets:
+
+```python
+from norm_utils import Normalizer
+normalizer  = Normalizer.load(f'{model_dir}/normalizer.npz')
+data_train  = normalizer.transform(data_train)
+data_verify = normalizer.transform(data_verify)
+```
 
 ### PyTorch — resume from last epoch
 
@@ -419,6 +485,7 @@ Outputs are split between `odir` (logs and metrics) and `model_dir` (weights).
 | `training_curves.svg` | `odir` | figure: avg_loss, train_err, H¹, L² per epoch |
 | `best_model.safetensors` | `model_dir` | best checkpoint (lowest L² eval loss) |
 | `last_model.pt` | `model_dir` | last-epoch resumable checkpoint (when `save_last=True`) |
+| `normalizer.npz` | `model_dir` | normalizer state for inverse transform (`_norm` scripts only) |
 | `checkpoint_<epoch>/` | `model_dir` | periodic resumable checkpoints (when `checkpoint_freq` is set) |
 
 ### MLX
@@ -432,6 +499,7 @@ Outputs are split between `odir` (logs and metrics) and `model_dir` (weights).
 | `last_model.safetensors` | `model_dir` | last-epoch model weights (when `save_last=True`) |
 | `last_optimizer.safetensors` | `model_dir` | last-epoch optimizer state (when `save_last=True`) |
 | `last_state.json` | `model_dir` | epoch metadata for resuming (when `save_last=True`) |
+| `normalizer.npz` | `model_dir` | normalizer state for inverse transform (`_norm` scripts only) |
 | `checkpoint_<epoch>/` | `model_dir` | periodic resumable checkpoints (when `checkpoint_freq` is set) |
 
 ---
@@ -454,6 +522,8 @@ Outputs are split between `odir` (logs and metrics) and `model_dir` (weights).
 | `training_utils` | `load_last_checkpoint` | load saved state and return resume epoch |
 | `parse_training_log` | `TrainingHistory` | in-memory metrics collection, JSON save/load, SVG plot |
 | `parse_training_log` | `plot_training_log` | legacy text-log plotter |
+| `NormFn3d` | `NormFn3d` | physics-motivated normalisation functions and their inverses |
+| `norm_utils` | `build_normalizer`, `Normalizer` | stateful normalizer — fit/transform/inverse/save/load (`_norm` scripts only) |
 
 ---
 
