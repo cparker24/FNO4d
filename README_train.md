@@ -278,16 +278,111 @@ allocation.
 ## Resuming training
 
 When `save_last=True` (default), a full resumable checkpoint is written to
-`model_dir` after the last epoch. To continue a run, load the checkpoint at
-the start of the next script and adjust `n_epochs`:
+`model_dir` after the last epoch. The model architecture and hyperparameters
+are **not** stored in the checkpoint — the same config (or parameter block)
+used for the original run must be used when resuming.
+
+### PyTorch — resume from last epoch
+
+Use the same script but set `n_epochs` to the **total** number of epochs you
+want in the end (not the remaining count). The snippet below replaces the
+training block:
 
 ```python
 from training_utils import load_last_checkpoint
 
+total_epochs = 200       # final target — must be > epochs already trained
+
+model = FNO(
+    in_channels=4, out_channels=4,
+    n_modes=n_modes, hidden_channels=hidden_channels,
+    projection_channel_ratio=2,
+).to(device)
+
+optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=30)
+
+trainer = Trainer(model=model, n_epochs=total_epochs,
+                  device=device, wandb_log=False,
+                  eval_interval=eval_interval,
+                  use_distributed=False, verbose=True)
+
+patch_trainer_logging(trainer, log, history=history)
+
+# --- resume ---
 resume_epoch = load_last_checkpoint(trainer, optimizer, scheduler, model_dir)
-# then pass remaining epochs to trainer:
+trainer.n_epochs = total_epochs - resume_epoch   # remaining epochs only
+
+trainer.train(train_loader=train_loader,
+              test_loaders=test_loaders,
+              optimizer=optimizer, scheduler=scheduler,
+              regularizer=False, save_dir=model_dir,
+              save_best=save_best_key,
+              training_loss=train_loss, eval_losses=eval_losses)
+```
+
+`load_last_checkpoint` reads `model_dir/last_model.pt` and restores model
+weights, AdamW moments, and the cosine LR schedule position into the objects
+already constructed above.
+
+To resume from a **periodic checkpoint** instead, pass the subdirectory:
+
+```python
+resume_epoch = load_last_checkpoint(trainer, optimizer, scheduler,
+                                    f'{model_dir}/checkpoint_50')
 trainer.n_epochs = total_epochs - resume_epoch
-trainer.train(...)
+```
+
+---
+
+### MLX — resume from last epoch
+
+```python
+from training_utils import load_last_checkpoint
+
+total_epochs = 200       # final target — must be > epochs already trained
+
+model = FNO(
+    in_channels=4, out_channels=4,
+    n_modes=n_modes, hidden_channels=hidden_channels,
+    projection_channel_ratio=2,
+)
+
+optimizer = AdamW(lr=lr, weight_decay=weight_decay)
+scheduler = optim_mlx.cosine_decay(lr, T_max := 30)
+
+trainer = Trainer(
+    model=model, n_epochs=total_epochs,
+    device=device, wandb_log=False,
+    eval_interval=eval_interval,
+    use_distributed=False, verbose=True,
+)
+
+patch_trainer_logging(trainer, log, history=history)
+
+# --- resume ---
+resume_epoch = load_last_checkpoint(trainer, optimizer, scheduler, model_dir)
+trainer.n_epochs = total_epochs - resume_epoch   # remaining epochs only
+
+trainer.train(
+    train_loader=train_loader, test_loaders=test_loaders,
+    optimizer=optimizer, scheduler=scheduler,
+    regularizer=False, save_dir=model_dir,
+    save_best=save_best_key,
+    training_loss=train_loss, eval_losses=eval_losses,
+)
+```
+
+`load_last_checkpoint` reads `model_dir/last_model.safetensors` (model
+weights) and `model_dir/last_optimizer.safetensors` (AdamW state), and
+returns the next epoch number from `model_dir/last_state.json`.
+
+To resume from a **periodic checkpoint**:
+
+```python
+resume_epoch = load_last_checkpoint(trainer, optimizer, scheduler,
+                                    f'{model_dir}/checkpoint_50')
+trainer.n_epochs = total_epochs - resume_epoch
 ```
 
 ### Files written by `save_last`
