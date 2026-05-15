@@ -76,14 +76,26 @@ model_dir        = cfg.get('model_dir', odir)
 norm_cfg         = cfg.get('normalization', {'name': 'none'})
 
 # ---------------------------------------------------------------------------
+# ensure output directories exist
+# ---------------------------------------------------------------------------
+_odir_created_msg = None
+if not Path(odir).exists():
+    Path(odir).mkdir(parents=True, exist_ok=True)
+    _odir_created_msg = f"[INFO] created odir '{odir}' (did not exist)"
+    print(_odir_created_msg)
+
+# ---------------------------------------------------------------------------
 # logging
 # ---------------------------------------------------------------------------
 log = RunLog(f'{odir}/training_mlx.log' if log_directly else None)
 
+if _odir_created_msg and log._f:
+    log._f.write(_odir_created_msg + '\n')
+    log._f.flush()
+
 if not Path(model_dir).exists():
-    raise FileNotFoundError(
-        f"model_dir '{model_dir}' does not exist — please create it before running."
-    )
+    Path(model_dir).mkdir(parents=True, exist_ok=True)
+    log(f"[INFO] created model_dir '{model_dir}' (did not exist)")
 
 t0 = perf_counter()
 

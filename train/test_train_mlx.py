@@ -36,6 +36,7 @@ model_dir = './'
 # ---------------------------------------------------------------------------
 import sys
 import gc
+from pathlib import Path
 import mlx.core as mx
 import mlx.optimizers as optim_mlx
 from time import perf_counter
@@ -52,7 +53,24 @@ from memory_utils import calculate_model_memory, reset_peak_memory, log_peak_mem
 from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint, save_last_checkpoint
 from parse_training_log import TrainingHistory
 
+# ---------------------------------------------------------------------------
+# ensure output directories exist
+# ---------------------------------------------------------------------------
+_odir_created_msg = None
+if not Path(odir).exists():
+    Path(odir).mkdir(parents=True, exist_ok=True)
+    _odir_created_msg = f"[INFO] created odir '{odir}' (did not exist)"
+    print(_odir_created_msg)
+
 log = RunLog(f'{odir}/training_mlx.log' if log_directly else None)
+
+if _odir_created_msg and log._f:
+    log._f.write(_odir_created_msg + '\n')
+    log._f.flush()
+
+if not Path(model_dir).exists():
+    Path(model_dir).mkdir(parents=True, exist_ok=True)
+    log(f"[INFO] created model_dir '{model_dir}' (did not exist)")
 
 t0 = perf_counter()
 
