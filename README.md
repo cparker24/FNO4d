@@ -45,7 +45,8 @@ FNO4d/
 │   ├── parse_training_log.py    # parse and plot training logs
 │   ├── skinnycontour.py         # contour utilities
 │   ├── NormFn3d.py              # physics-motivated normalisation functions and inverses
-│   └── norm_utils.py            # stateful Normalizer wrapper (fit/transform/inverse/save/load)
+│   ├── norm_utils.py            # stateful Normalizer wrapper (fit/transform/inverse/save/load)
+│   └── model_eval.py            # ModelEval — full metric suite (nRMSE, fRMSE, MELR, WLR, …)
 │
 └── train/                       # training entry points
     ├── test_train.py            # PyTorch training script (hardcoded params)
@@ -63,8 +64,10 @@ FNO4d/
     ├── apply.py                 # marimo inference app
     ├── eval_model_test_torch.py # PyTorch eval — imshow visualisation
     ├── eval_model_test_mlx.py   # MLX eval — imshow visualisation
-    ├── eval_model_test_cont_torch.py # PyTorch eval — skinnycontour CDF contours
-    └── eval_model_test_cont_mlx.py   # MLX eval — skinnycontour CDF contours
+    ├── eval_model_test_cont_torch.py  # PyTorch eval — skinnycontour CDF contours
+    ├── eval_model_test_cont_mlx.py    # MLX eval — skinnycontour CDF contours
+    ├── eval_model_test_metric_torch.py # PyTorch eval — full metric suite
+    └── eval_model_test_metric_mlx.py   # MLX eval — full metric suite
 ```
 
 ---
@@ -487,29 +490,109 @@ marimo edit train/apply.py
 
 ### Evaluation
 
-Four marimo evaluation scripts live in `train/` and offer richer controls than
-`apply.py` — checkpoint selection, separate eval files, L² error curves, and
-skinnycontour CDF-level overlays.  See [README_eval.md](README_eval.md) for
-full documentation (UI controls, output formats, normalisation, examples).
+Six marimo evaluation notebooks live in `train/`.  See [README_eval.md](README_eval.md)
+for the visual/contour notebooks and [README_eval_metric.md](README_eval_metric.md)
+for the full metric suite.
 
-| Script | Framework | Visualisation |
+| Script | Framework | Output |
 |---|---|---|
-| `train/eval_model_test_torch.py` | PyTorch | `imshow` (truth / FNO rows) |
-| `train/eval_model_test_mlx.py` | MLX | `imshow` (truth / FNO rows) |
-| `train/eval_model_test_cont_torch.py` | PyTorch | skinnycontour CDF contours |
-| `train/eval_model_test_cont_mlx.py` | MLX | skinnycontour CDF contours |
-
-Quick start:
+| `eval_model_test_torch.py` | PyTorch | `imshow` field snapshots |
+| `eval_model_test_mlx.py` | MLX | `imshow` field snapshots |
+| `eval_model_test_cont_torch.py` | PyTorch | skinnycontour CDF overlays |
+| `eval_model_test_cont_mlx.py` | MLX | skinnycontour CDF overlays |
+| `eval_model_test_metric_torch.py` | PyTorch | nRMSE, fRMSE, MELR, WLR, spectral maps |
+| `eval_model_test_metric_mlx.py` | MLX | nRMSE, fRMSE, MELR, WLR, spectral maps |
 
 ```bash
 cd train/
-marimo run eval_model_test_torch.py        # imshow — PyTorch
-marimo run eval_model_test_cont_torch.py   # skinnycontour — PyTorch
-marimo run eval_model_test_cont_mlx.py     # skinnycontour — MLX
+marimo run eval_model_test_metric_torch.py   # full metric suite — PyTorch
+marimo run eval_model_test_metric_mlx.py     # full metric suite — MLX
 ```
 
 Marimo is not installed by default; run `bash install_marimo.sh` after
 activating the FNO4d environment (see [README_eval.md](README_eval.md#installing-marimo-optional)).
+
+---
+
+## Model evaluation
+
+`loc_libs/model_eval.py` provides a framework-agnostic `ModelEval` class that
+computes the complete evaluation battery recommended for neural fluid-dynamics
+surrogates.  It works on raw NumPy arrays and has no dependency on PyTorch or MLX.
+
+### Metric categories
+
+| Category | Metrics | What they catch |
+|---|---|---|
+| **Pointwise** | nRMSE, RMSE | Overall field accuracy — the headline number |
+| **Pointwise** | MaxError | Worst-case local failure (freeze-out surface spikes) |
+| **Pointwise** | bRMSE | Accuracy at the domain boundary (freeze-out proxy) |
+| **Pointwise** | cRMSE | Violations of global energy-momentum conservation |
+| **Pointwise** | vRMSE | Whether spatial contrast (not just mean level) is reproduced |
+| **Spectral** | fRMSE (low/mid/high) | Scale-resolved errors; catches FNO over-smoothing |
+| **Spectral** | MELR | Spectral energy bias (negative = over-smooth, typical for FNO) |
+| **Spectral** | WLR | Spectral shape distortion independent of total energy |
+| **Spectral** | Spectral error map | 2-D Fourier-space failure pattern |
+| **Spectral** | Energy spectrum | log-log E(K) cascade fidelity over time |
+| **Temporal** | AR rollout | Error accumulation under autoregressive stepping |
+
+Standard training losses (L² or H¹) collapse all of the above into a single scalar
+that conflates scales and locations.  A model that predicts bulk flow correctly but
+destroys sub-nucleon eccentricity fluctuations will appear "good" by nRMSE while
+producing wrong flow harmonics v₃ and higher.  The spectral metrics are the
+quantitative check.
+
+### Quick usage
+
+```python
+import sys, numpy as np
+sys.path.append('loc_libs')
+from model_eval import ModelEval
+
+# pred, true: (N, C, nx, ny, neta, T)  — physical units, initial condition excluded
+ev = ModelEval(
+    pred          = model_out_phys,
+    true          = y_true_phys,
+    tau_coords    = tau_out_coords,   # fm/c
+    eta_coords    = eta_coords,
+    channel_names = ['ε', 'vx', 'vy', 'vη'],
+)
+
+# All scalar metrics at once
+print(ev.summary())
+# {'nRMSE': 0.084, 'MaxError': 0.31, 'bRMSE': 0.087, 'cRMSE': 0.021,
+#  'fRMSE_low': 0.070, 'fRMSE_mid': 0.086, 'fRMSE_high': 0.123,
+#  'MELR': -0.152, 'WLR': 0.087, ...}
+
+# 2×3 dashboard figure
+fig = ev.plot_dashboard(channel=0, ieta=0)
+fig.savefig('dashboard.pdf', bbox_inches='tight')
+
+# Save for reporting
+import json
+with open('out/metrics_eval.json', 'w') as f:
+    json.dump(ev.summary(), f, indent=2)
+```
+
+The `fRMSE_high` being noticeably larger than `fRMSE_low` and a negative `MELR`
+are the standard FNO signature of high-frequency over-smoothing.
+
+### Minimum publication checklist
+
+```
+nRMSE             — headline pointwise accuracy
+fRMSE low/mid/high — scale-resolved error; exposes smoothing invisible to nRMSE
+MELR              — signed spectral energy bias (negative = over-smooth)
+AR rollout curve  — nRMSE vs τ under autoregressive stepping (1-step models)
+```
+
+Add `cRMSE` when conservation-law fidelity is important, and v₂/v₃/⟨pT⟩
+(via Cooper-Frye freeze-out, not yet automated) as the final physics gate.
+
+### Documentation
+
+Full mathematical definitions, physical motivation, code examples, and API
+reference: **[README_eval_metric.md](README_eval_metric.md)**
 
 ---
 

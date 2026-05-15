@@ -1,6 +1,6 @@
 # FNO Evaluation Scripts
 
-Four [marimo](https://marimo.io) notebooks for evaluating trained FNO models on test data.
+Six [marimo](https://marimo.io) notebooks for evaluating trained FNO models on test data.
 See the main README for environment setup and dependencies.
 
 | Script | Framework | Visualisation | Checkpoint formats |
@@ -9,6 +9,10 @@ See the main README for environment setup and dependencies.
 | `train/eval_model_test_mlx.py` | MLX | `imshow` (truth / FNO rows) | MLX `.safetensors` (native) or PyTorch `.pt` (via weight transfer) |
 | `train/eval_model_test_cont_torch.py` | PyTorch | skinnycontour (CDF contour lines) | `.pt` files written by the PyTorch training scripts |
 | `train/eval_model_test_cont_mlx.py` | MLX | skinnycontour (CDF contour lines) | MLX `.safetensors` (native) or PyTorch `.pt` (via weight transfer) |
+| `train/eval_model_test_metric_torch.py` | PyTorch | Full metric suite (nRMSE, fRMSE, MELR, WLR, spectral maps) | `.pt` files |
+| `train/eval_model_test_metric_mlx.py` | MLX | Full metric suite (nRMSE, fRMSE, MELR, WLR, spectral maps) | MLX `.safetensors` (native) or PyTorch `.pt` (via weight transfer) |
+
+For full documentation of the metric suite see **[README_eval_metric.md](README_eval_metric.md)**.
 
 The `_cont_*` scripts use the **skinnycontour** approach from `apply.py`: truth is shown as a
 background image with white/black CDF-level contour lines overlaid, and the FNO prediction is
