@@ -10,6 +10,8 @@ marimo notebooks:
 
 See [README_eval.md](README_eval.md) for the simpler contour-only notebooks.
 
+**Warning**: These metrices are not fully tested and implemented by Claude Sonnet 4.6, so consider this as a starting point to further explore, not to be used w/o further validation. Ultimately the final hadron spectra, vn, etc will be used to validate, but it might be interesting to explore these alterntives, more focused on the pure prediction and model aspects.
+
 ---
 
 ## Table of contents
