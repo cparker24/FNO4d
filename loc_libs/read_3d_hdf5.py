@@ -51,7 +51,8 @@ _SCALAR_KEYS = [
 def convert_root_to_hdf5(root_file_path, hdf5_file_path,
                           nevents=-1, choose_ntau=None,
                           chunk_events=1,
-                          storage_options=None):
+                          storage_options=None,
+                          verbose=False):
     '''Convert a variable-length-tau ROOT file to HDF5 with chunked storage.
 
     Parameters
@@ -142,13 +143,15 @@ def convert_root_to_hdf5(root_file_path, hdf5_file_path,
             rd_stop = min(rd_start + read_batch, nevents)
             print(f"Reading ROOT events {rd_start}–{rd_stop} ...")
 
-            current, peak = tracemalloc.get_traced_memory()
-            print(f"[Memory] before read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
+            if verbose:
+                current, peak = tracemalloc.get_traced_memory()
+                print(f"[Memory] before read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
 
             arr_ak_batch = branch.array(entry_start=rd_start, entry_stop=rd_stop, library='ak')
 
-            current, peak = tracemalloc.get_traced_memory()
-            print(f"[Memory] after  read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
+            if verbose:
+                current, peak = tracemalloc.get_traced_memory()
+                print(f"[Memory] after  read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
 
             for wr_start in range(rd_start, rd_stop, write_chunk):
                 wr_stop  = min(wr_start + write_chunk, rd_stop)
@@ -180,7 +183,7 @@ def convert_root_to_hdf5(root_file_path, hdf5_file_path,
 
 # ---------------------------------------------------------------------------
 
-def read_3d_data_hdf5(hdf5_file_path, nevents=-1, start_event=0):
+def read_3d_data_hdf5(hdf5_file_path, nevents=-1, start_event=0, verbose=False):
     '''Load data from a pre-converted HDF5 file with true partial reads.
 
     Unlike read_3d_data() on a ROOT file, this never loads more than the
@@ -217,18 +220,20 @@ def read_3d_data_hdf5(hdf5_file_path, nevents=-1, start_event=0):
 
         # True partial read: HDF5 only decompresses the chunks that overlap
         # [start_event, end_event) — no full-file load.
-        # Reset peak so the reported peak reflects THIS read only, not any
-        # prior operations (e.g. a ROOT→HDF5 conversion earlier in the run).
-        tracemalloc.reset_peak()
-        current, peak = tracemalloc.get_traced_memory()
-        print(f"[Memory] before HDF5 read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
+        if verbose:
+            # Reset peak so the reported peak reflects THIS read only, not any
+            # prior operations (e.g. a ROOT→HDF5 conversion earlier in the run).
+            tracemalloc.reset_peak()
+            current, peak = tracemalloc.get_traced_memory()
+            print(f"[Memory] before HDF5 read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
 
         dat['arr']            = hf['arr'][start_event:end_event]
         dat['ntau_freezeout'] = hf['ntau_freezeout'][start_event:end_event]
         dat['tau_freezeout']  = hf['tau_freezeout'][start_event:end_event]
 
-        current, peak = tracemalloc.get_traced_memory()
-        print(f"[Memory] after  HDF5 read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
+        if verbose:
+            current, peak = tracemalloc.get_traced_memory()
+            print(f"[Memory] after  HDF5 read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
 
     n_loaded = end_event - start_event
     print(f"Loaded {n_loaded} events from {hdf5_file_path}; arr shape: {dat['arr'].shape}")
@@ -250,7 +255,7 @@ if __name__ == '__main__':
     h5_file   = sys.argv[2] if len(sys.argv) > 2 else root_file.replace('.root', '.h5')
 
     tracemalloc.start()
-    convert_root_to_hdf5(root_file, h5_file, nevents=-1, chunk_events=1)
-    dat = read_3d_data_hdf5(h5_file, nevents=10)
+    convert_root_to_hdf5(root_file, h5_file, nevents=-1, chunk_events=1, verbose=True)
+    dat = read_3d_data_hdf5(h5_file, nevents=10, verbose=True)
     print('arr shape:', dat['arr'].shape)
     tracemalloc.stop()

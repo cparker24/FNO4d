@@ -17,6 +17,7 @@ Two parallel training stacks are provided:
 
 ```
 FNO4d/
+├── README_train.md              # PyTorch training script — parameters, data format, outputs
 ├── install.sh                   # install into current env (inherits system packages)
 ├── install_full.sh              # create a fresh isolated env (conda or virtualenv)
 ├── install_kernel.sh            # register active env as a Jupyter kernel
@@ -36,19 +37,25 @@ FNO4d/
 │
 ├── neuraloperator-4d-2.0.0/     # PyTorch neuraloperator (local 4D fork)
 │
-├── loc_libs/                    # local helper library (data I/O, visualisation)
+├── loc_libs/                    # local helper library (data I/O, normalisation, utilities)
 │   ├── read_3d_root.py          # read events from ROOT files (local or cloud)
 │   ├── read_3d_hdf5.py          # ROOT → HDF5 conversion + streaming reads
 │   ├── root_pytorch_loader.py   # IterableDataset for large ROOT files
 │   ├── parse_training_log.py    # parse and plot training logs
 │   ├── skinnycontour.py         # contour utilities
-│   └── NormFn.py                # normalisation helpers
+│   ├── NormFn3d.py              # physics-motivated normalisation functions and inverses
+│   └── norm_utils.py            # stateful Normalizer wrapper (fit/transform/inverse/save/load)
 │
 └── train/                       # training entry points
-    ├── test_train.py            # PyTorch training script
+    ├── test_train.py            # PyTorch training script (hardcoded params)
     ├── test_train.ipynb         # PyTorch training notebook
-    ├── test_train_mlx.py        # MLX training script (Mac)
+    ├── test_train_mlx.py        # MLX training script (hardcoded params, Mac)
     ├── test_train_mlx.ipynb     # MLX training notebook (Mac)
+    ├── test_train_yaml.py       # PyTorch training script (YAML config)
+    ├── test_train_mlx_yaml.py   # MLX training script (YAML config, Mac)
+    ├── test_train_yaml_norm.py  # PyTorch training script (YAML config + normalisation)
+    ├── test_train_mlx_yaml_norm.py # MLX training script (YAML config + normalisation, Mac)
+    ├── config_test_train.yaml   # shared YAML config for all YAML-based scripts
     ├── test_train_hdf5.ipynb    # HDF5-backed PyTorch training notebook
     ├── test_mem_data_load.py    # memory profiling — ROOT loader
     ├── test_mem_data_load_hdf5.py # memory profiling — HDF5 loader
@@ -427,6 +434,9 @@ train_ratio = 0.8
 ```
 
 ### PyTorch path (Linux / Lambda)
+
+See [README_train.md](README_train.md) for a full description of parameters,
+input format, output files, and the `loc_libs` helpers used.
 
 ```bash
 cd train

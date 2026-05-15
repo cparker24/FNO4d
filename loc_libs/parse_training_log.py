@@ -1,7 +1,130 @@
 import re
+import json
 
 import numpy as np
 import matplotlib.pyplot as plt
+
+
+class TrainingHistory:
+    """Accumulate per-epoch train/eval metrics in memory, with save/load/plot.
+
+    Populated automatically by patch_trainer_logging(..., history=history).
+
+    Structure::
+
+        history.train  →  {'epoch': [...], 'avg_loss': [...], 'train_err': [...]}
+        history.eval   →  {'epoch': [...], '100_h1': [...], '100_l2': [...]}
+
+    Usage::
+
+        history = TrainingHistory()
+        patch_trainer_logging(trainer, log, history=history)
+        trainer.train(...)
+        history.save(f'{odir}/metrics.json')
+        history.plot(save_path=f'{odir}/training_curves.svg')
+    """
+
+    def __init__(self):
+        self.train = {}
+        self.eval = {}
+
+    def record_train(self, epoch, *, time, avg_loss, train_err,
+                     avg_lasso_loss=None, **kwargs):
+        self.train.setdefault('epoch', []).append(epoch)
+        self.train.setdefault('time',  []).append(time)
+        self.train.setdefault('avg_loss',  []).append(avg_loss)
+        self.train.setdefault('train_err', []).append(train_err)
+        if avg_lasso_loss is not None:
+            self.train.setdefault('avg_lasso_loss', []).append(avg_lasso_loss)
+
+    def record_eval(self, epoch, eval_metrics):
+        self.eval.setdefault('epoch', []).append(epoch)
+        for k, v in eval_metrics.items():
+            if isinstance(v, float) or hasattr(v, 'item'):
+                self.eval.setdefault(k, []).append(float(v))
+
+    def save(self, path):
+        with open(path, 'w') as f:
+            json.dump({'train': self.train, 'eval': self.eval}, f, indent=2)
+
+    @classmethod
+    def load(cls, path):
+        with open(path) as f:
+            d = json.load(f)
+        h = cls()
+        h.train = d.get('train', {})
+        h.eval  = d.get('eval', {})
+        return h
+
+    # Human-readable labels for known metric keys
+    _YLABEL_MAP = {
+        'avg_loss':       'avg loss',
+        'train_err':      'train error',
+        'avg_lasso_loss': 'lasso loss',
+    }
+
+    @staticmethod
+    def _fmt_ylabel(key):
+        """Format a metric key for axis labels and legend entries.
+
+        Examples: 'avg_loss' → 'avg loss',
+                  '100_h1'   → 'H¹  (res 100)',
+                  '100_l2'   → 'L²  (res 100)'
+        """
+        if key in TrainingHistory._YLABEL_MAP:
+            return TrainingHistory._YLABEL_MAP[key]
+        m = re.match(r'^(\d+)_(\w+)$', key)
+        if m:
+            res, metric = m.groups()
+            pretty = {'h1': 'H¹', 'l2': 'L²'}.get(metric, metric)
+            return f'{pretty}  (res {res})'
+        return key.replace('_', ' ')
+
+    def plot(self, save_path=None, title=''):
+        """Plot train and eval metrics, optionally saving to save_path.
+
+        Returns (fig, axes).
+        """
+        train_keys = [k for k in ('avg_loss', 'train_err', 'avg_lasso_loss')
+                      if k in self.train]
+        eval_keys  = [k for k in self.eval if k != 'epoch']
+        plot_keys  = train_keys + eval_keys
+
+        if not plot_keys:
+            return None, None
+
+        n = len(plot_keys)
+        fig, axes = plt.subplots(n, 1, sharex=True, figsize=(8, 2 * n))
+        if n == 1:
+            axes = [axes]
+
+        train_epochs = self.train.get('epoch', [])
+        eval_epochs  = self.eval.get('epoch', [])
+
+        for ax, key in zip(axes, plot_keys):
+            ylabel = self._fmt_ylabel(key)
+            if key in self.train:
+                ax.plot(train_epochs, self.train[key],
+                        marker='o', ms=3, lw=1, color='tab:blue',
+                        label=f'{ylabel}  [train]')
+            if key in self.eval:
+                ax.plot(eval_epochs, self.eval[key],
+                        marker='s', ms=3, lw=1, color='tab:orange',
+                        label=f'{ylabel}  [eval]')
+            ax.set_ylabel(ylabel)
+            ax.legend(fontsize=8, loc='upper right',
+                      framealpha=0.8, edgecolor='0.8')
+            ax.grid(True, alpha=0.3)
+
+        axes[-1].set_xlabel('Epoch')
+        if title:
+            plt.suptitle(title, y=1.01)
+        plt.tight_layout(h_pad=0.5)
+
+        if save_path:
+            plt.savefig(save_path, bbox_inches='tight')
+
+        return fig, axes
 def parse_training_log(filename):
     """
     Parse the training log file and extract time, avg_loss, train_err, 100_h1, and 100_l2 values.

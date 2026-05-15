@@ -1,0 +1,46 @@
+# ---------------------------------------------------------------------------
+# FNO training config — shared by test_train_yaml.py and test_train_mlx_yaml.py
+# Usage:
+#   python test_train_yaml.py     [--config config_test_train.yaml]
+#   python test_train_mlx_yaml.py [--config config_test_train.yaml]
+# ---------------------------------------------------------------------------
+
+# --- output ---
+odir: ./out                          # logs, metrics, training curves
+model_dir: ./checkpoints               # best_model.safetensors and checkpoints (must exist)
+
+# --- input data ---
+input_dir: /Users/du8478/FNO_Hydro_Data/flat
+input_files:
+  - dAu_25ev_mb.root
+nevents_in: 10          # -1 = all events in file
+
+# --- normalisation (test_train_yaml_norm.py / test_train_mlx_yaml_norm.py only) ---
+# grid params (tau_min, dtau, eta_min, deta) are read from the data file automatically
+normalization:
+  name: none            # none | etau75_3d | etau75_eta_3d | etau75_eta_shape_3d | cosh_etau75_3d
+  # alpha: 1.0          # exponent for cosh_etau75_3d only (default 1.0)
+
+# --- data preparation ---
+train_ratio: 0.8
+xyslice:  [null, -1]    # slice(None, -1) — drop last spatial bin
+tauslice: [null, -1]    # slice(None, -1) — drop last tau bin
+
+# --- model ---
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]   # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 3
+batch_size: 1
+checkpoint_freq: null   # save checkpoint every N epochs; null = disabled
+save_last: true         # save last epoch state to model_dir/last_model.* after training
+eval_interval: 2        # run evaluation every N epochs
+test_batch_sizes: [10]  # eval batch size per test resolution
+
+# --- optimizer ---
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true      # mirror output to training.log / training_mlx.log
