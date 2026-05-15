@@ -18,6 +18,7 @@ Two parallel training stacks are provided:
 ```
 FNO4d/
 ├── README_train.md              # PyTorch training script — parameters, data format, outputs
+├── README_eval.md               # evaluation / inference scripts — UI controls, outputs, examples
 ├── install.sh                   # install into current env (inherits system packages)
 ├── install_full.sh              # create a fresh isolated env (conda or virtualenv)
 ├── install_kernel.sh            # register active env as a Jupyter kernel
@@ -59,7 +60,11 @@ FNO4d/
     ├── test_train_hdf5.ipynb    # HDF5-backed PyTorch training notebook
     ├── test_mem_data_load.py    # memory profiling — ROOT loader
     ├── test_mem_data_load_hdf5.py # memory profiling — HDF5 loader
-    └── apply.py                 # marimo inference app
+    ├── apply.py                 # marimo inference app
+    ├── eval_model_test_torch.py # PyTorch eval — imshow visualisation
+    ├── eval_model_test_mlx.py   # MLX eval — imshow visualisation
+    ├── eval_model_test_cont_torch.py # PyTorch eval — skinnycontour CDF contours
+    └── eval_model_test_cont_mlx.py   # MLX eval — skinnycontour CDF contours
 ```
 
 ---
@@ -479,6 +484,32 @@ marimo run train/apply.py
 # or to edit:
 marimo edit train/apply.py
 ```
+
+### Evaluation
+
+Four marimo evaluation scripts live in `train/` and offer richer controls than
+`apply.py` — checkpoint selection, separate eval files, L² error curves, and
+skinnycontour CDF-level overlays.  See [README_eval.md](README_eval.md) for
+full documentation (UI controls, output formats, normalisation, examples).
+
+| Script | Framework | Visualisation |
+|---|---|---|
+| `train/eval_model_test_torch.py` | PyTorch | `imshow` (truth / FNO rows) |
+| `train/eval_model_test_mlx.py` | MLX | `imshow` (truth / FNO rows) |
+| `train/eval_model_test_cont_torch.py` | PyTorch | skinnycontour CDF contours |
+| `train/eval_model_test_cont_mlx.py` | MLX | skinnycontour CDF contours |
+
+Quick start:
+
+```bash
+cd train/
+marimo run eval_model_test_torch.py        # imshow — PyTorch
+marimo run eval_model_test_cont_torch.py   # skinnycontour — PyTorch
+marimo run eval_model_test_cont_mlx.py     # skinnycontour — MLX
+```
+
+Marimo is not installed by default; run `bash install_marimo.sh` after
+activating the FNO4d environment (see [README_eval.md](README_eval.md#installing-marimo-optional)).
 
 ---
 
