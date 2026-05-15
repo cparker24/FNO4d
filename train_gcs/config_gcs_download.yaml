@@ -19,16 +19,16 @@
 # the "Storage Object Viewer" role on the bucket.  To also upload outputs
 # after training, it needs "Storage Object Creator" (or "Storage Object User"
 # to allow overwriting existing blobs).
-gcs_key_file: /path/to/service_account.json
+gcs_key_file: ./fnotest-wayne-gcs.json
 
 # --- post-training upload (optional) ---
 # If set, model_dir is uploaded to {gcs_output_prefix}/checkpoints and odir
 # is uploaded to {gcs_output_prefix}/logs after training completes.
-# Comment out or remove this key to skip the upload.
-# gcs_output_prefix: gs://my-bucket/runs/run01
+# Remove this key or set it to null to skip the upload.
+gcs_output_prefix: gs://test_fno/runs/run01
 
 # --- local data cache ---
-local_data_dir: ./data     # directory where downloaded .root files are stored
+local_data_dir: ../data     # directory where downloaded .root files are stored
 overwrite_cache: false     # set to true to force re-download even if file exists
 
 # --- output ---
@@ -37,7 +37,7 @@ model_dir: ./checkpoints   # best_model.safetensors and checkpoints
 
 # --- input data (full gs:// URIs — input_dir is not used in download mode) ---
 input_files:
-  - gs://my-bucket/data/dAu_25ev_mb.root
+  - gs://test_fno/dAu_25ev_mb.root
   # - gs://my-bucket/data/dAu_25ev_mb_2.root   # add more files here
 
 nevents_in: 10             # number of events to load (-1 = all; MLX default: 10)
