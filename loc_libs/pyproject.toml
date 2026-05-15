@@ -24,6 +24,7 @@ dependencies = [
 gcs = [
     "gcsfs",
     "google-cloud-storage",
+    "tqdm",
 ]
 # AWS S3 streaming (uproot reads s3:// URIs via fsspec)
 #   pip install -e './loc_libs[s3]'

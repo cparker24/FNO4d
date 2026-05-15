@@ -41,6 +41,12 @@ try:
 except ImportError:
     _GCS_STORAGE_AVAILABLE = False
 
+try:
+    import tqdm as _tqdm  # noqa: F401
+    _TQDM_AVAILABLE = True
+except ImportError:
+    _TQDM_AVAILABLE = False
+
 
 def _require_gcsfs():
     if not _GCSFS_AVAILABLE:
@@ -58,6 +64,28 @@ def _require_gcs_storage():
             "Install with:  pip install -e './loc_libs[gcs]'\n"
             "           or: pip install -r requirements-gcs.txt"
         )
+
+
+def _download_blob(blob, local_path, label: str = "") -> None:
+    """Download *blob* to *local_path* with a tqdm byte-level progress bar.
+
+    Falls back to a plain ``download_to_filename`` call when tqdm is not
+    installed (``pip install tqdm`` to enable the bar).
+    """
+    if _TQDM_AVAILABLE:
+        from tqdm import tqdm
+        with open(str(local_path), "wb") as fh:
+            with tqdm.wrapattr(
+                fh, "write",
+                total=blob.size,
+                desc=label or str(local_path.name if hasattr(local_path, "name") else local_path),
+                unit="B", unit_scale=True, unit_divisor=1024,
+                dynamic_ncols=True,
+                miniters=1,
+            ) as fout:
+                blob.download_to_file(fout)
+    else:
+        blob.download_to_filename(str(local_path))
 
 
 # ---------------------------------------------------------------------------
@@ -147,13 +175,14 @@ def download_gcs_file(gs_uri: str, local_dir: str, key_file: str,
             return str(local_path)
 
     Path(local_dir).mkdir(parents=True, exist_ok=True)
-    print(f"[GCS] downloading gs://{bucket_name}/{blob_path}")
-    print(f"[GCS]          → {local_path}")
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_path)
-    blob.download_to_filename(str(local_path))
-    size_mib = local_path.stat().st_size / 1024**2
-    print(f"[GCS] done  ({size_mib:.1f} MiB)")
+    blob.reload()
+    size_mib = blob.size / 1024**2
+    print(f"[GCS] downloading  gs://{bucket_name}/{blob_path}")
+    print(f"[GCS]           →  {local_path}  ({size_mib:.1f} MiB)")
+    _download_blob(blob, local_path, label=filename)
+    print(f"[GCS] done")
     return str(local_path)
 
 
@@ -242,7 +271,7 @@ def download_gcs_prefix(gs_prefix: str, local_dir: str, key_file: str,
                 continue
 
         print(f"[GCS] {blob.name}  →  {local_path}  ({blob.size / 1024**2:.1f} MiB)")
-        blob.download_to_filename(str(local_path))
+        _download_blob(blob, local_path, label=Path(blob.name).name)
         local_paths.append(str(local_path))
 
     print(f"[GCS] prefix sync complete — {len(local_paths)} file(s) in {local_dir}")
@@ -514,7 +543,7 @@ def download_gcs_dir(gs_prefix: str, local_dir: str, key_file: str,
                 continue
 
         print(f"[GCS]   {rel}  ({size_mib:.1f} MiB)")
-        blob.download_to_filename(str(local_path))
+        _download_blob(blob, local_path, label=rel)
         local_paths.append(str(local_path))
 
     print(f"[GCS] download complete — {len(local_paths)} file(s) in {local_dir}/")

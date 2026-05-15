@@ -12,3 +12,4 @@
 #   detects any existing fsspec and pins gcsfs to match, so no version pins here.
 gcsfs                # fsspec driver for Google Cloud Storage
 google-cloud-storage # synchronous GCS client library (google.cloud.storage)
+tqdm                 # progress bar for GCS downloads
