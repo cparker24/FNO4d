@@ -250,12 +250,11 @@ def _(grid, data_test_norm, np):
 
 @app.cell
 def _(model_out_phys, y_true_phys, eta_coords, tau_out_coords, xy_extent,
-       ntau_out, neta_eff, event_ui, tau_idx_ui, channel_ui, np, plt):
+       ntau_out, neta_eff, event_ui, tau_idx_ui, channel_ui, np, plt, mo):
     event   = int(event_ui.value)
     channel = int(channel_ui.value)
 
-    # parse tau indices; negative indices wrap around
-    _raw_idx = [t.strip() for t in tau_idx_ui.value.split(',') if t.strip()]
+    _raw_idx    = [t.strip() for t in tau_idx_ui.value.split(',') if t.strip()]
     tau_indices = [int(t) % ntau_out for t in _raw_idx]
     tau_indices = [t for t in tau_indices if 0 <= t < ntau_out]
     print(f'Plotting event {event}, channel {channel}, tau indices: {tau_indices}')
@@ -263,13 +262,12 @@ def _(model_out_phys, y_true_phys, eta_coords, tau_out_coords, xy_extent,
     n_tau_sel = len(tau_indices)
     ch_label  = ['e (GeV/fm³)', 'vx', 'vy', 'vη'][channel] if channel < 4 else f'ch{channel}'
 
-    # one figure per η bin — rows: truth / FNO; columns: selected τ steps
     for _ieta in range(neta_eff):
         eta_phys = eta_coords[_ieta]
 
-        fig, axes = plt.subplots(2, n_tau_sel, figsize=(4.5 * n_tau_sel, 7),
-                                 squeeze=False)
-        fig.suptitle(f'η = {eta_phys:.2f}  (event {event})', fontsize=14, y=1.01)
+        _fig, _axes = plt.subplots(2, n_tau_sel, figsize=(4.5 * n_tau_sel, 7),
+                                   squeeze=False)
+        _fig.suptitle(f'η = {eta_phys:.2f}  (event {event})', fontsize=14, y=1.01)
 
         for _col, _t in enumerate(tau_indices):
             tau_phys = tau_out_coords[_t]
@@ -281,43 +279,40 @@ def _(model_out_phys, y_true_phys, eta_coords, tau_out_coords, xy_extent,
                          vmin=_vmin, vmax=_vmax, cmap='hot')
 
             for _row, (_dat, _lbl) in enumerate([(y_true_phys, 'Truth'), (model_out_phys, 'FNO')]):
-                ax = axes[_row, _col]
-                _d = _dat[event, channel, :, :, _ieta, _t]
-                im = ax.imshow(_d.T, **_kw)
-                ax.set_title(f'{_lbl}   τ = {tau_phys:.3f} fm/c', fontsize=10)
-                ax.set_xlabel('x (fm)')
-                ax.set_ylabel('y (fm)')
-                plt.colorbar(im, ax=ax, label=ch_label, fraction=0.046, pad=0.04)
+                _ax = _axes[_row, _col]
+                _d  = _dat[event, channel, :, :, _ieta, _t]
+                _im = _ax.imshow(_d.T, **_kw)
+                _ax.set_title(f'{_lbl}   τ = {tau_phys:.3f} fm/c', fontsize=10)
+                _ax.set_xlabel('x (fm)')
+                _ax.set_ylabel('y (fm)')
+                plt.colorbar(_im, ax=_ax, label=ch_label, fraction=0.046, pad=0.04)
 
-        plt.tight_layout()
-        plt.show()
+        _fig.tight_layout()
+        mo.output.append(_fig)
+        plt.close(_fig)
 
     return
 
 
 @app.cell
 def _(model_out_phys, y_true_phys, eta_coords, tau_out_coords,
-      ntau_out, neta_eff, event_ui, channel_ui, np, plt):
-    # L2 relative error vs τ — averaged over x, y, events
-    _event  = int(event_ui.value)
-    _ch     = int(channel_ui.value)
-    _denom  = np.mean(y_true_phys[:, _ch] ** 2, axis=(1, 2, 3))   # (N, neta, T)
-    _num    = np.mean((model_out_phys[:, _ch] - y_true_phys[:, _ch]) ** 2, axis=(1, 2, 3))
-    _rel_l2 = np.sqrt(np.mean(_num, axis=0) / np.maximum(np.mean(_denom, axis=0), 1e-30))
-    # shape: (neta, T)
+      neta_eff, channel_ui, np, plt):
+    _ch = int(channel_ui.value)
+    # average over events (0), x (1), y (2); keep neta (3) and tau (4)
+    _denom  = np.mean(y_true_phys[:, _ch] ** 2, axis=(0, 1, 2))                           # (neta, T)
+    _num    = np.mean((model_out_phys[:, _ch] - y_true_phys[:, _ch]) ** 2, axis=(0, 1, 2))
+    _rel_l2 = np.sqrt(_num / np.maximum(_denom, 1e-30))                                    # (neta, T)
 
-    fig2, ax2 = plt.subplots(figsize=(8, 4))
+    _fig2, _ax2 = plt.subplots(figsize=(8, 4))
     for _ie in range(neta_eff):
-        ax2.plot(tau_out_coords, _rel_l2[_ie], label=f'η={eta_coords[_ie]:.2f}')
-    ax2.set_xlabel('τ (fm/c)')
-    ax2.set_ylabel('Relative L² error')
-    ax2.set_title('Relative L² error vs τ (all η bins, test set)')
-    ax2.legend(fontsize=7, ncol=2)
-    ax2.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
-
-    return
+        _ax2.plot(tau_out_coords, _rel_l2[_ie], label=f'η={eta_coords[_ie]:.2f}')
+    _ax2.set_xlabel('τ (fm/c)')
+    _ax2.set_ylabel('Relative L² error')
+    _ax2.set_title('Relative L² error vs τ (all η bins, test set)')
+    _ax2.legend(fontsize=7, ncol=2)
+    _ax2.grid(True, alpha=0.3)
+    _fig2.tight_layout()
+    return _fig2
 
 
 @app.cell
