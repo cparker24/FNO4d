@@ -78,6 +78,8 @@ class Trainer:
         epoch_metrics = {}
 
         for epoch in range(self.n_epochs):
+            if hasattr(self, 'on_epoch_start'):
+                self.on_epoch_start(epoch)
             t0 = time.perf_counter()
             train_err, avg_loss = self._train_one_epoch(
                 epoch, train_loader, training_loss, optimizer, scheduler

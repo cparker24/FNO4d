@@ -191,16 +191,33 @@ def load_last_checkpoint(trainer, optimizer, scheduler, save_dir):
         return state['epoch'] + 1
 
 
-def patch_trainer_checkpoint(trainer, trainer_cls, checkpoint_freq, odir):
-    """Monkey-patch trainer.on_epoch_start to save checkpoints every checkpoint_freq epochs."""
+def patch_trainer_checkpoint(trainer, trainer_cls, checkpoint_freq, odir,
+                              optimizer=None):
+    """Monkey-patch trainer.on_epoch_start to save checkpoints every checkpoint_freq epochs.
+
+    For MLX trainers pass ``optimizer`` to include optimizer state in each
+    checkpoint, making them fully resumable (matching PyTorch behaviour).
+    """
+    import json
+    from pathlib import Path
+
+    is_mlx = hasattr(trainer, 'log_fn')
 
     def _on_epoch_start(self, epoch):
         self.epoch = epoch
         if self.epoch % checkpoint_freq == 0 and self.epoch > 0:
-            save_dir = f'{odir}/checkpoint_{self.epoch}'
-            if not os.path.exists(save_dir):
-                os.makedirs(save_dir)
-            self.checkpoint(save_dir)
-            print('saving checkpoint to ', save_dir)
+            ckpt_dir = Path(f'{odir}/checkpoint_{self.epoch}')
+            ckpt_dir.mkdir(parents=True, exist_ok=True)
+            self.checkpoint(str(ckpt_dir))
+            if is_mlx and optimizer is not None:
+                import mlx.core as mx
+                import mlx.utils as mlx_utils
+                flat_opt = dict(mlx_utils.tree_flatten(optimizer.state))
+                if flat_opt:
+                    mx.save_safetensors(
+                        str(ckpt_dir / 'optimizer.safetensors'), flat_opt)
+                with open(ckpt_dir / 'state.json', 'w') as f:
+                    json.dump({'epoch': self.epoch}, f, indent=2)
+            print('saving checkpoint to ', ckpt_dir)
 
     trainer.on_epoch_start = _on_epoch_start.__get__(trainer, trainer_cls)

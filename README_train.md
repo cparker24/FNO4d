@@ -299,6 +299,16 @@ trainer.train(...)
 | MLX | `last_optimizer.safetensors` | optimizer state |
 | MLX | `last_state.json` | epoch number and total epochs |
 
+### Periodic checkpoints (`checkpoint_freq`)
+
+Both frameworks write a subdirectory `checkpoint_<epoch>/` in `model_dir`
+every `checkpoint_freq` epochs. Contents are fully resumable:
+
+| framework | files in `checkpoint_<epoch>/` |
+|-----------|-------------------------------|
+| PyTorch | neuralop standard save — model weights, optimizer, scheduler, metadata |
+| MLX | `model.safetensors`, `optimizer.safetensors`, `state.json` |
+
 ---
 
 ## Output files
@@ -314,7 +324,7 @@ Outputs are split between `odir` (logs and metrics) and `model_dir` (weights).
 | `training_curves.svg` | `odir` | figure: avg_loss, train_err, H¹, L² per epoch |
 | `best_model.safetensors` | `model_dir` | best checkpoint (lowest L² eval loss) |
 | `last_model.pt` | `model_dir` | last-epoch resumable checkpoint (when `save_last=True`) |
-| `checkpoint_<epoch>/` | `model_dir` | periodic checkpoints (when `checkpoint_freq` is set) |
+| `checkpoint_<epoch>/` | `model_dir` | periodic resumable checkpoints (when `checkpoint_freq` is set) |
 
 ### MLX
 
@@ -327,7 +337,7 @@ Outputs are split between `odir` (logs and metrics) and `model_dir` (weights).
 | `last_model.safetensors` | `model_dir` | last-epoch model weights (when `save_last=True`) |
 | `last_optimizer.safetensors` | `model_dir` | last-epoch optimizer state (when `save_last=True`) |
 | `last_state.json` | `model_dir` | epoch metadata for resuming (when `save_last=True`) |
-| `checkpoint_<epoch>/` | `model_dir` | periodic checkpoints (when `checkpoint_freq` is set) |
+| `checkpoint_<epoch>/` | `model_dir` | periodic resumable checkpoints (when `checkpoint_freq` is set) |
 
 ---
 

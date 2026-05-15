@@ -187,7 +187,7 @@ history = TrainingHistory()
 patch_trainer_logging(trainer, log, history=history)
 
 if checkpoint_freq is not None and checkpoint_freq > 0:
-    patch_trainer_checkpoint(trainer, Trainer, checkpoint_freq, model_dir)
+    patch_trainer_checkpoint(trainer, Trainer, checkpoint_freq, model_dir, optimizer=optimizer)
 
 save_best_key = f'{test_resolutions[0]}_l2'
 
