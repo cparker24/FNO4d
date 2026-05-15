@@ -9,6 +9,7 @@ import argparse
 import yaml
 import sys
 import gc
+from pathlib import Path
 import mlx.core as mx
 import mlx.optimizers as optim_mlx
 from time import perf_counter
@@ -21,8 +22,8 @@ from neuralop_mlx.utils import count_model_params
 sys.path.append('../loc_libs')
 from read_3d_root import read_3d_data
 from datasets import FluidDatasetMLX
-from memory_utils import calculate_model_memory
-from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint
+from memory_utils import calculate_model_memory, reset_peak_memory, log_peak_memory
+from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint, save_last_checkpoint
 from parse_training_log import TrainingHistory
 
 # ---------------------------------------------------------------------------
@@ -52,13 +53,22 @@ checkpoint_freq = cfg.get('checkpoint_freq', None)
 train_ratio     = cfg.get('train_ratio', 0.8)
 xyslice         = _slice(cfg.get('xyslice', [None, -1]))
 tauslice        = _slice(cfg.get('tauslice', [None, -1]))
-lr              = cfg['lr']
-weight_decay    = cfg.get('weight_decay', 1e-4)
+lr               = cfg['lr']
+weight_decay     = cfg.get('weight_decay', 1e-4)
+test_batch_sizes = cfg.get('test_batch_sizes', [10])
+eval_interval    = cfg.get('eval_interval', 2)
+save_last        = cfg.get('save_last', True)
+model_dir        = cfg.get('model_dir', odir)
 
 # ---------------------------------------------------------------------------
 # logging
 # ---------------------------------------------------------------------------
 log = RunLog(f'{odir}/training_mlx.log' if log_directly else None)
+
+if not Path(model_dir).exists():
+    raise FileNotFoundError(
+        f"model_dir '{model_dir}' does not exist — please create it before running."
+    )
 
 t0 = perf_counter()
 
@@ -78,8 +88,11 @@ log(f'xyslice:         {xyslice}')
 log(f'tauslice:        {tauslice}')
 log(f'log_directly:    {log_directly}')
 log(f'nevents(in):     {nevents_in}')
-log(f'AdamW: lr:       {lr}')
+log(f'AdamW: lr:         {lr}')
 log(f'AdamW: weight_decay: {weight_decay}')
+log(f'test_batch_sizes:  {test_batch_sizes}')
+log(f'eval_interval:     {eval_interval}')
+log(f'model_dir:         {model_dir}')
 
 # ---------------------------------------------------------------------------
 # load data
@@ -102,6 +115,7 @@ del arr_data
 gc.collect()
 
 log(f'nevents (constrained by input file): {arr.shape[0]}')
+test_resolutions = [arr.shape[2]]
 
 n_train = int(arr.shape[0] * train_ratio)
 data_train = arr[:n_train]
@@ -121,8 +135,6 @@ dataset_test  = FluidDatasetMLX(data_verify)
 
 train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
 
-test_resolutions = [100]
-test_batch_sizes = [10]
 test_loaders = {}
 for res, test_bsize in zip(test_resolutions, test_batch_sizes):
     log(f'res {res}')
@@ -166,7 +178,7 @@ trainer = Trainer(
     n_epochs=n_epochs,
     device=device,
     wandb_log=False,
-    eval_interval=2,
+    eval_interval=eval_interval,
     use_distributed=False,
     verbose=True,
 )
@@ -175,24 +187,31 @@ history = TrainingHistory()
 patch_trainer_logging(trainer, log, history=history)
 
 if checkpoint_freq is not None and checkpoint_freq > 0:
-    patch_trainer_checkpoint(trainer, Trainer, checkpoint_freq, odir)
+    patch_trainer_checkpoint(trainer, Trainer, checkpoint_freq, model_dir)
+
+save_best_key = f'{test_resolutions[0]}_l2'
 
 # ---------------------------------------------------------------------------
 # train
 # ---------------------------------------------------------------------------
+reset_peak_memory(mlx=True)
 trainer.train(
     train_loader=train_loader,
     test_loaders=test_loaders,
     optimizer=optimizer,
     scheduler=scheduler,
     regularizer=False,
-    save_dir=odir,
-    save_best='100_l2',
+    save_dir=model_dir,
+    save_best=save_best_key,
     training_loss=train_loss,
     eval_losses=eval_losses,
 )
 
+if save_last:
+    save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, model_dir)
+log_peak_memory(log, mlx=True)
 history.save(f'{odir}/metrics_mlx.json')
 history.plot(save_path=f'{odir}/training_curves_mlx.svg', title='FNO Training (MLX)')
 log(f'metrics   → {odir}/metrics_mlx.json')
 log(f'curves    → {odir}/training_curves_mlx.svg')
+log(f'total time: {perf_counter() - t0:.1f}s')

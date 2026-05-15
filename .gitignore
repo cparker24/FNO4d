@@ -8,3 +8,4 @@ train/*.json
 *.svg
 train/*.pt
 train/*.pkl
+train/*/*.json

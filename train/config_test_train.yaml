@@ -6,7 +6,8 @@
 # ---------------------------------------------------------------------------
 
 # --- output ---
-odir: ./
+odir: ./out                          # logs, metrics, training curves
+model_dir: ./checkpoints               # best_model.safetensors and checkpoints (must exist)
 
 # --- input data ---
 input_dir: /Users/du8478/FNO_Hydro_Data/flat
@@ -24,9 +25,12 @@ hidden_channels: 16
 n_modes: [32, 32, 16, 16]   # Fourier modes [x, y, eta, tau]
 
 # --- training ---
-n_epochs: 1
+n_epochs: 3
 batch_size: 1
 checkpoint_freq: null   # save checkpoint every N epochs; null = disabled
+save_last: true         # save last epoch state to model_dir/last_model.* after training
+eval_interval: 2        # run evaluation every N epochs
+test_batch_sizes: [10]  # eval batch size per test resolution
 
 # --- optimizer ---
 lr: 8.0e-3

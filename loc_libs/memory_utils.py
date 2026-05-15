@@ -32,6 +32,36 @@ class MemoryPrinter:
         print(output)
 
 
+def reset_peak_memory(*, cuda=False, mlx=False):
+    """Reset peak-memory counters before a training run."""
+    if cuda:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+    if mlx:
+        import mlx.core as mx
+        if hasattr(mx, 'reset_peak_memory'):
+            mx.reset_peak_memory()
+
+
+def log_peak_memory(log_fn, *, cuda=False, mlx=False):
+    """Log peak CPU RSS and, if requested, peak GPU memory after training."""
+    rss = psutil.Process(os.getpid()).memory_info().rss / 1024 ** 3
+    log_fn(f'peak CPU memory (RSS): {rss:.2f} GB')
+    if cuda:
+        import torch
+        if torch.cuda.is_available():
+            peak = torch.cuda.max_memory_allocated() / 1024 ** 3
+            log_fn(f'peak CUDA memory:      {peak:.2f} GB')
+        else:
+            log_fn('peak CUDA memory:      n/a (no CUDA device)')
+    if mlx:
+        import mlx.core as mx
+        if hasattr(mx, 'get_peak_memory'):
+            peak = mx.get_peak_memory() / 1024 ** 3
+            log_fn(f'peak Metal memory:     {peak:.2f} GB')
+
+
 def calculate_model_memory(model, count_fn=None):
     """Return model memory footprint in MB assuming float32 parameters.
 

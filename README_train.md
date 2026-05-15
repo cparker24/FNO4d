@@ -5,12 +5,14 @@ data stored in ROOT files. The model learns to evolve the hydrodynamic fields
 (energy density, transverse velocities, longitudinal velocity) from an initial
 τ-slice forward in proper time.
 
-Two training scripts are provided — one per compute backend:
+Four training scripts are provided — two backends × two configuration styles:
 
-| Script | Package | Backend | Target |
-|--------|---------|---------|--------|
-| `test_train.py` | `neuralop` (local 4D fork) | CUDA / CPU | Lambda / HPC |
-| `test_train_mlx.py` | `neuralop_mlx` | Metal (Apple Silicon) | Mac M-series |
+| Script | Config style | Package | Backend | Target |
+|--------|-------------|---------|---------|--------|
+| `test_train.py` | hardcoded at top | `neuralop` (local 4D fork) | CUDA / CPU | Lambda / HPC |
+| `test_train_mlx.py` | hardcoded at top | `neuralop_mlx` | Metal (Apple Silicon) | Mac M-series |
+| `test_train_yaml.py` | YAML file | `neuralop` (local 4D fork) | CUDA / CPU | Lambda / HPC |
+| `test_train_mlx_yaml.py` | YAML file | `neuralop_mlx` | Metal (Apple Silicon) | Mac M-series |
 
 ---
 
@@ -20,7 +22,7 @@ Two training scripts are provided — one per compute backend:
 conda activate fno_env_mlx
 ```
 
-Both scripts require the local helper library `loc_libs`.
+All scripts require the local helper library `loc_libs`.
 
 ---
 
@@ -40,6 +42,10 @@ the `train/` directory.
 
 ## Running
 
+### Hardcoded-parameter scripts
+
+Edit the parameter block at the top of the script, then run:
+
 ```bash
 cd train/
 
@@ -52,15 +58,26 @@ python test_train_mlx.py
 
 Notebook equivalents: `test_train.ipynb`, `test_train_mlx.ipynb`.
 
+### YAML-config scripts
+
+Both YAML scripts share a single config file:
+
+```bash
+cd train/
+mkdir models          # model_dir must exist before running
+
+# PyTorch (CUDA / CPU)
+python test_train_yaml.py                               # uses config_test_train.yaml
+python test_train_yaml.py --config my_run.yaml          # override
+
+# MLX (Apple Silicon Metal)
+python test_train_mlx_yaml.py                          # uses config_test_train.yaml
+python test_train_mlx_yaml.py --config my_run.yaml     # override
+```
+
 ---
 
 ## Input data
-
-| parameter | PyTorch default | MLX default | description |
-|-----------|----------------|-------------|-------------|
-| `input_dir` | `./` | `/Users/du8478/FNO_Hydro_Data/flat` | directory containing ROOT files |
-| `input_files` | `['dAu_25ev_mb.root']` | `['dAu_25ev_mb.root']` | list of ROOT files to load |
-| `nevents_in` | `-1` (all) | `10` | events to load; `-1` = all |
 
 ROOT files are read with `read_3d_data` from `loc_libs/read_3d_root.py`.
 Each file must contain a flat 6-D array of shape
@@ -93,10 +110,17 @@ arr_data = read_3d_data(f'{input_dir}/{f}', nevents=nevents_in, verbose=True)
 
 ## Training parameters
 
-All parameters live at the **top of the script** for easy editing before each run.
+For the hardcoded scripts all parameters live at the **top of the script**.
+For the YAML scripts they live in `config_test_train.yaml` (or a custom file
+passed via `--config`).
 
 | parameter | default | description |
 |-----------|---------|-------------|
+| `odir` | `./` | output directory for logs, metrics, and training curves |
+| `model_dir` | `./` | output directory for `best_model.safetensors` and checkpoints; **must exist** |
+| `input_dir` | `/Users/du8478/FNO_Hydro_Data/flat` | directory containing ROOT files |
+| `input_files` | `['dAu_25ev_mb.root']` | list of ROOT files to load |
+| `nevents_in` | `10` | events to load; `-1` = all |
 | `n_epochs` | `1` | number of training epochs |
 | `batch_size` | `1` | events per mini-batch |
 | `train_ratio` | `0.8` | fraction of events used for training |
@@ -104,8 +128,26 @@ All parameters live at the **top of the script** for easy editing before each ru
 | `n_modes` | `[32,32,16,16]` | Fourier modes per spatial/time dimension `[x, y, η, τ]` |
 | `lr` | `8e-3` | AdamW learning rate |
 | `weight_decay` | `1e-4` | AdamW weight decay |
-| `checkpoint_freq` | `None` | save a checkpoint every N epochs; `None` disables |
+| `test_batch_sizes` | `[10]` | eval batch size per test resolution |
+| `eval_interval` | `2` | run evaluation every N training epochs |
+| `checkpoint_freq` | `None` | save a periodic checkpoint every N epochs; `None` disables |
+| `save_last` | `True` | save a full resumable checkpoint after the last epoch |
 | `log_directly` | `True` | mirror all output to a log file (see Logging) |
+| `xyslice` | `[null, -1]` | YAML form of `slice(None, -1)` — drop last spatial bin |
+| `tauslice` | `[null, -1]` | YAML form of `slice(None, -1)` — drop last tau bin |
+
+`test_resolutions` is not a parameter — it is derived automatically from
+`arr.shape[2]` (the x-dimension of the loaded, sliced data) so the eval metric
+keys always match the actual grid size.
+
+### `model_dir` validation
+
+The YAML scripts check that `model_dir` exists at startup and abort immediately
+if it does not — before any data is loaded:
+
+```
+FileNotFoundError: model_dir './models' does not exist — please create it before running.
+```
 
 ---
 
@@ -151,14 +193,14 @@ y  : τ-slices 1 … n_tau−1                       →  shape (4, nx, ny, n_et
 
 | class | used by | return type |
 |-------|---------|-------------|
-| `FluidDataset` | `test_train.py` | `torch.FloatTensor` |
-| `FluidDatasetMLX` | `test_train_mlx.py` | `numpy.float32` (MLX Trainer converts to `mx.array`) |
+| `FluidDataset` | `test_train.py`, `test_train_yaml.py` | `torch.FloatTensor` |
+| `FluidDatasetMLX` | `test_train_mlx.py`, `test_train_mlx_yaml.py` | `numpy.float32` (MLX Trainer converts to `mx.array`) |
 
 ---
 
 ## Logging
 
-Both scripts use `RunLog` from `loc_libs/training_utils.py`:
+All scripts use `RunLog` from `loc_libs/training_utils.py`:
 
 ```python
 log = RunLog(f'{odir}/training.log' if log_directly else None)
@@ -168,9 +210,10 @@ log = RunLog(f'{odir}/training.log' if log_directly else None)
   appends the same line to the log file.
 - `log_directly=False` — plain `print` only, no file written.
 
-`patch_trainer_logging(trainer, log)` routes the Trainer's per-epoch output
-(train error, eval metrics) through the same `log` object, so all metrics
-appear in the log file alongside the configuration summary.
+`patch_trainer_logging(trainer, log, history=history)` routes the Trainer's
+per-epoch output through the same `log` object and into the `TrainingHistory`
+collector, so all metrics appear in the log file alongside the configuration
+summary.
 
 ---
 
@@ -192,9 +235,11 @@ history.plot(save_path=f'{odir}/training_curves.svg', title='FNO Training')
 ```json
 {
   "train": {"epoch": [...], "time": [...], "avg_loss": [...], "train_err": [...]},
-  "eval":  {"epoch": [...], "100_h1": [...], "100_l2": [...]}
+  "eval":  {"epoch": [...], "<nx>_h1": [...], "<nx>_l2": [...]}
 }
 ```
+
+where `<nx>` is the x-dimension bin count derived from the data.
 
 ### Reloading and replotting
 
@@ -212,26 +257,77 @@ runs.
 
 ---
 
+## Memory and runtime reporting
+
+After training completes, all scripts log:
+
+```
+peak CPU memory (RSS): 4.32 GB
+peak Metal memory:     2.18 GB   # MLX scripts
+peak CUDA memory:      6.07 GB   # PyTorch scripts (n/a if no CUDA device)
+total time: 142.3s
+```
+
+Peak counters are reset just before `trainer.train()` so they reflect training
+only (not data loading). Reading the counters has no measurable impact on
+training performance — they are maintained as a side-effect of normal
+allocation.
+
+---
+
+## Resuming training
+
+When `save_last=True` (default), a full resumable checkpoint is written to
+`model_dir` after the last epoch. To continue a run, load the checkpoint at
+the start of the next script and adjust `n_epochs`:
+
+```python
+from training_utils import load_last_checkpoint
+
+resume_epoch = load_last_checkpoint(trainer, optimizer, scheduler, model_dir)
+# then pass remaining epochs to trainer:
+trainer.n_epochs = total_epochs - resume_epoch
+trainer.train(...)
+```
+
+### Files written by `save_last`
+
+| framework | file | contents |
+|-----------|------|---------|
+| PyTorch | `last_model.pt` | model, optimizer, scheduler state dicts + epoch number |
+| MLX | `last_model.safetensors` | model weights |
+| MLX | `last_optimizer.safetensors` | optimizer state |
+| MLX | `last_state.json` | epoch number and total epochs |
+
+---
+
 ## Output files
 
-### PyTorch (`test_train.py`)
+Outputs are split between `odir` (logs and metrics) and `model_dir` (weights).
 
-| file | description |
-|------|-------------|
-| `training.log` | config summary + per-epoch train/eval metrics |
-| `metrics.json` | structured JSON of all per-epoch metrics |
-| `training_curves.svg` | 4-panel figure: avg_loss, train_err, 100_h1, 100_l2 |
-| `best_model.safetensors` | best checkpoint (lowest `100_l2`) |
-| `checkpoint_<epoch>/` | periodic checkpoints (when `checkpoint_freq` is set) |
+### PyTorch
 
-### MLX (`test_train_mlx.py`)
+| file | location | description |
+|------|----------|-------------|
+| `training.log` | `odir` | config summary + per-epoch train/eval metrics |
+| `metrics.json` | `odir` | structured JSON of all per-epoch metrics |
+| `training_curves.svg` | `odir` | figure: avg_loss, train_err, H¹, L² per epoch |
+| `best_model.safetensors` | `model_dir` | best checkpoint (lowest L² eval loss) |
+| `last_model.pt` | `model_dir` | last-epoch resumable checkpoint (when `save_last=True`) |
+| `checkpoint_<epoch>/` | `model_dir` | periodic checkpoints (when `checkpoint_freq` is set) |
 
-| file | description |
-|------|-------------|
-| `training_mlx.log` | config summary + per-epoch train/eval metrics |
-| `metrics_mlx.json` | structured JSON of all per-epoch metrics |
-| `training_curves_mlx.svg` | 4-panel figure |
-| `best_model.safetensors` | best checkpoint (lowest `100_l2`) |
+### MLX
+
+| file | location | description |
+|------|----------|-------------|
+| `training_mlx.log` | `odir` | config summary + per-epoch train/eval metrics |
+| `metrics_mlx.json` | `odir` | structured JSON of all per-epoch metrics |
+| `training_curves_mlx.svg` | `odir` | figure: avg_loss, train_err, H¹, L² per epoch |
+| `best_model.safetensors` | `model_dir` | best checkpoint (lowest L² eval loss) |
+| `last_model.safetensors` | `model_dir` | last-epoch model weights (when `save_last=True`) |
+| `last_optimizer.safetensors` | `model_dir` | last-epoch optimizer state (when `save_last=True`) |
+| `last_state.json` | `model_dir` | epoch metadata for resuming (when `save_last=True`) |
+| `checkpoint_<epoch>/` | `model_dir` | periodic checkpoints (when `checkpoint_freq` is set) |
 
 ---
 
@@ -244,9 +340,13 @@ runs.
 | `datasets` | `FluidDatasetMLX` | MLX Dataset — returns numpy float32 |
 | `memory_utils` | `calculate_model_memory` | parameter count and MB footprint |
 | `memory_utils` | `MemoryPrinter` | callable RSS printer for ad-hoc profiling |
+| `memory_utils` | `reset_peak_memory` | reset CPU/GPU peak counters before training |
+| `memory_utils` | `log_peak_memory` | log peak CPU RSS and GPU memory after training |
 | `training_utils` | `RunLog` | unified terminal + file logger |
-| `training_utils` | `patch_trainer_logging` | route Trainer verbose output through `RunLog` and `TrainingHistory` |
+| `training_utils` | `patch_trainer_logging` | route Trainer output through `RunLog` and `TrainingHistory` |
 | `training_utils` | `patch_trainer_checkpoint` | periodic checkpoint saving via `on_epoch_start` |
+| `training_utils` | `save_last_checkpoint` | save full resumable state after last epoch |
+| `training_utils` | `load_last_checkpoint` | load saved state and return resume epoch |
 | `parse_training_log` | `TrainingHistory` | in-memory metrics collection, JSON save/load, SVG plot |
 | `parse_training_log` | `plot_training_log` | legacy text-log plotter |
 
