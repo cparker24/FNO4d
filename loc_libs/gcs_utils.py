@@ -107,6 +107,40 @@ def _download_blob(blob, local_path, label: str = "",
             blob.download_to_file(fout)
 
 
+def _upload_blob(local_path, blob, label: str = "",
+                 show_progress=None) -> None:
+    """Upload *local_path* to *blob* with an optional tqdm progress bar.
+
+    *show_progress* follows the same convention as :func:`_download_blob`:
+      None  — auto (bar shown in a TTY, silent otherwise).
+      True  — always show.
+      False — never show.
+
+    Falls back to ``upload_from_filename`` when tqdm is not installed.
+    """
+    local_path = Path(local_path)
+    if not _TQDM_AVAILABLE:
+        blob.upload_from_filename(str(local_path))
+        return
+
+    from tqdm.auto import tqdm
+    disable = None if show_progress is None else not show_progress
+
+    size = local_path.stat().st_size
+    desc = label or local_path.name
+    with open(str(local_path), "rb") as fh:
+        with tqdm.wrapattr(
+            fh, "read",
+            total=size,
+            desc=desc,
+            unit="B", unit_scale=True, unit_divisor=1024,
+            dynamic_ncols=True,
+            miniters=1,
+            disable=disable,
+        ) as fh_wrapped:
+            blob.upload_from_file(fh_wrapped, size=size)
+
+
 # ---------------------------------------------------------------------------
 # streaming helpers
 # ---------------------------------------------------------------------------
@@ -307,17 +341,20 @@ def download_gcs_prefix(gs_prefix: str, local_dir: str, key_file: str,
 # ---------------------------------------------------------------------------
 
 def upload_gcs_file(local_path: str, gs_uri: str, key_file: str,
-                    overwrite: bool = False) -> str:
+                    overwrite: bool = False,
+                    show_progress=None) -> str:
     """Upload a single local file to a GCS destination URI.
 
     If *overwrite* is False (default) and a blob already exists at *gs_uri*
     with the same byte-size as the local file, the upload is skipped.
 
     Args:
-        local_path: Path to the local file to upload.
-        gs_uri:     Destination URI, e.g. ``gs://my-bucket/checkpoints/model.pt``.
-        key_file:   Path to a GCS service-account JSON key file.
-        overwrite:  Always upload, even if a matching remote blob exists.
+        local_path:    Path to the local file to upload.
+        gs_uri:        Destination URI, e.g. ``gs://my-bucket/checkpoints/model.pt``.
+        key_file:      Path to a GCS service-account JSON key file.
+        overwrite:     Always upload, even if a matching remote blob exists.
+        show_progress: None = auto (tqdm in TTY, silent otherwise),
+                       True = always show bar, False = never show bar.
 
     Returns:
         The destination URI (str) — *gs_uri* unchanged.
@@ -357,14 +394,15 @@ def upload_gcs_file(local_path: str, gs_uri: str, key_file: str,
 
     size_mib = local.stat().st_size / 1024**2
     print(f"[GCS] uploading {local}  →  {gs_uri}  ({size_mib:.1f} MiB)")
-    blob.upload_from_filename(str(local))
+    _upload_blob(local, blob, label=local.name, show_progress=show_progress)
     print(f"[GCS] done")
     return gs_uri
 
 
 def upload_gcs_dir(local_dir: str, gs_prefix: str, key_file: str,
                    overwrite: bool = False,
-                   pattern: str = "**/*") -> list:
+                   pattern: str = "**/*",
+                   show_progress=None) -> list:
     """Upload a local directory tree to a GCS prefix.
 
     Equivalent to ``gsutil -m cp -r local_dir/ gs://bucket/prefix/``.
@@ -444,7 +482,7 @@ def upload_gcs_dir(local_dir: str, gs_prefix: str, key_file: str,
                 continue
 
         print(f"[GCS]   {rel}  →  {gs_uri}  ({size_mib:.1f} MiB)")
-        blob.upload_from_filename(str(local_file))
+        _upload_blob(local_file, blob, label=str(rel), show_progress=show_progress)
         gs_uris.append(gs_uri)
 
     print(f"[GCS] upload complete — {len(gs_uris)} file(s) at gs://{bucket_name}/{blob_prefix}/")

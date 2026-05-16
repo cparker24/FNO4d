@@ -148,6 +148,7 @@ def cmd_upload_file(args):
         gs_uri=args.gs_uri,
         key_file=key,
         overwrite=args.overwrite,
+        show_progress=True if args.progress else None,
     )
 
 
@@ -159,6 +160,7 @@ def cmd_upload_dir(args):
         key_file=key,
         overwrite=args.overwrite,
         pattern=args.pattern,
+        show_progress=True if args.progress else None,
     )
 
 
@@ -169,7 +171,7 @@ def cmd_download_file(args):
         local_dir=args.local_dir,
         key_file=key,
         overwrite=args.overwrite,
-        show_progress=None,
+        show_progress=True if args.progress else None,
     )
 
 
@@ -181,7 +183,7 @@ def cmd_download_dir(args):
         key_file=key,
         overwrite=args.overwrite,
         pattern=args.pattern,
-        show_progress=None,
+        show_progress=True if args.progress else None,
     )
 
 
@@ -208,6 +210,11 @@ def build_parser() -> argparse.ArgumentParser:
     parent_transfer.add_argument(
         "--overwrite", action="store_true",
         help="Re-upload/re-download even if a matching file already exists.",
+    )
+    parent_transfer.add_argument(
+        "--progress", action="store_true",
+        help="Always show a tqdm progress bar (default: auto — shown in a TTY, "
+             "silent when output is redirected).",
     )
 
     parser = argparse.ArgumentParser(

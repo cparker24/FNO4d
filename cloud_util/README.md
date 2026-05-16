@@ -39,14 +39,18 @@ python gcs.py <command> [options] <positional args>
 | `download-file` | Download a single GCS object to a local directory |
 | `download-dir` | Download a GCS prefix (directory) to a local directory |
 
-### Common flags
+### Flags
 
 | Flag | Commands | Default | Description |
 |---|---|---|---|
 | `--key-file JSON` | all | `$GCS_KEY_FILE` | Service-account JSON key file |
 | `-r`, `--recursive` | `ls` | off | List all objects recursively instead of top-level only |
+| `--progress` | transfer commands | auto | Always show a tqdm progress bar |
 | `--overwrite` | transfer commands | off | Re-transfer even if a size-matched copy already exists |
 | `--pattern GLOB` | `*-dir` commands | `**/*` | Glob filter relative to the source root |
+
+> **Progress bar default:** when `--progress` is not set the bar is shown automatically
+> in an interactive terminal and suppressed when output is redirected (log files, batch jobs).
 
 ## Examples
 
@@ -80,6 +84,12 @@ python gcs.py upload-file model.pt gs://my-bucket/runs/run01/model.pt \
     --key-file service_account.json
 ```
 
+**Upload a single file with progress bar**
+```bash
+python gcs.py upload-file model.pt gs://my-bucket/runs/run01/model.pt \
+    --key-file service_account.json --progress
+```
+
 **Upload a directory** (everything)
 ```bash
 python gcs.py upload-dir ./out/run01 gs://my-bucket/runs/run01/ \
@@ -98,10 +108,10 @@ python gcs.py download-file gs://my-bucket/data/events.root ./data/ \
     --key-file service_account.json
 ```
 
-**Download a full directory**
+**Download a full directory with progress bars**
 ```bash
 python gcs.py download-dir gs://my-bucket/runs/run01/ ./local/run01/ \
-    --key-file service_account.json
+    --key-file service_account.json --progress
 ```
 
 **Download JSON files only**
