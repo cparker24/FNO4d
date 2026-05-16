@@ -1,7 +1,7 @@
 _pycache__/
 *.pyc
 *venv*
-*loc_libs.egg-info*
+*.egg-info*
 .DS_Store
 *.log
 *.safetensors
