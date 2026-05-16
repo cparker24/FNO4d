@@ -8,5 +8,11 @@
         ]
     },
     "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda"
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "python.analysis.extraPaths": [
+        "./loc_libs",
+        "./neuralop_mlx",
+        "./neuraloperator-4d-2.0.0"
+    ]
+
 }
