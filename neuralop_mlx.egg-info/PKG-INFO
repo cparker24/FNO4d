@@ -1,6 +1,0 @@
-Metadata-Version: 2.4
-Name: neuralop_mlx
-Version: 0.1.0
-Summary: MLX port of Fourier Neural Operator (FNO)
-Requires-Python: >=3.10
-Requires-Dist: mlx>=0.16
