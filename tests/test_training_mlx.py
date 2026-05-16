@@ -66,8 +66,8 @@ class TestTrainer:
         total_init = 0.0
         n = 0
         for batch in train_loader:
-            x = mx.array(np.array(batch["x"]))
-            y = mx.array(np.array(batch["y"]))
+            x = mx.array(batch["x"].numpy())
+            y = mx.array(batch["y"].numpy())
             loss_val = h1loss(model(x), y)
             mx.eval(loss_val)
             total_init += loss_val.item()
@@ -88,8 +88,8 @@ class TestTrainer:
         total_final = 0.0
         n = 0
         for batch in train_loader:
-            x = mx.array(np.array(batch["x"]))
-            y = mx.array(np.array(batch["y"]))
+            x = mx.array(batch["x"].numpy())
+            y = mx.array(batch["y"].numpy())
             loss_val = h1loss(model(x), y)
             mx.eval(loss_val)
             total_final += loss_val.item()
