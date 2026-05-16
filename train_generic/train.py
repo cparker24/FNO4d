@@ -182,9 +182,11 @@ log(f'normalization:     {norm_cfg}')
 # ---------------------------------------------------------------------------
 log(f'Events called for {nevents_in}')
 
+if not input_files:
+    raise ValueError("No data found in the specified input files.")
+
 if data_source == 'local':
-    arr_data = [read_3d_data(f'{input_dir}/{f}', nevents=nevents_in, local_rank=None)
-                for f in input_files]
+    arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, local_rank=None)
 
 elif data_source == 'gcs_download':
     log(f'Downloading {len(input_files)} file(s) from GCS ...')
@@ -196,31 +198,25 @@ elif data_source == 'gcs_download':
     log(f'Download complete in {perf_counter() - t_dl:.1f}s')
     for gs_uri, local_path in zip(input_files, local_files):
         log(f'  {gs_uri}  →  {local_path}')
-    arr_data = [read_3d_data(f, nevents=nevents_in, local_rank=None) for f in local_files]
+    arr_data = read_3d_data(local_files, nevents=nevents_in, local_rank=None)
 
 else:  # gcs_stream
     storage_options = get_gcs_storage_options(gcs_key_file)
-    arr_data = [
-        read_3d_data(f, nevents=nevents_in, local_rank=None, storage_options=storage_options)
-        for f in input_files
-    ]
-
-if len(arr_data) == 0:
-    raise ValueError("No data found in the specified input files.")
+    arr_data = read_3d_data(input_files, nevents=nevents_in, local_rank=None, storage_options=storage_options)
 
 log('Data parameters from input file:')
-for key in arr_data[0].keys():
+for key in arr_data.keys():
     if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
-        log(f'  {key}: {arr_data[0][key]}')
+        log(f'  {key}: {arr_data[key]}')
 
-arr = arr_data[0]['arr']
+arr = arr_data['arr']
 arr = arr[:, :, xyslice, xyslice, tauslice, :]
 
-grid_params = {k: arr_data[0][k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
+grid_params = {k: arr_data[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
 del arr_data
 gc.collect()
 
-log(f'nevents (constrained by input file): {arr.shape[0]}')
+log(f'nevents (constrained by input file(s)): {arr.shape[0]}')
 test_resolutions = [arr.shape[2]]
 
 # ---------------------------------------------------------------------------

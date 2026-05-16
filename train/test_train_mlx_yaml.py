@@ -113,17 +113,16 @@ log(f'model_dir:         {model_dir}')
 # ---------------------------------------------------------------------------
 log(f'Events called for {nevents_in}')
 
-arr_data = [read_3d_data(f'{input_dir}/{f}', nevents=nevents_in, local_rank=None) for f in input_files]
-
-if len(arr_data) == 0:
+if not input_files:
     raise ValueError("No data found in the specified input files.")
+arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, local_rank=None)
 
 log('Data parameters from input file:')
-for key in arr_data[0].keys():
+for key in arr_data.keys():
     if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
-        log(f'  {key}: {arr_data[0][key]}')
+        log(f'  {key}: {arr_data[key]}')
 
-arr = arr_data[0]['arr']
+arr = arr_data['arr']
 arr = arr[:, :, xyslice, xyslice, tauslice, :]
 del arr_data
 gc.collect()

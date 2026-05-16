@@ -143,49 +143,18 @@ snapshot1 = tracemalloc.take_snapshot()
 
 # get the 3D data array, and then integrate out the eta component to make it 2D + time trainable
 
-arr_data = [read_3d_data(f'{input_dir}/{f}', nevents=nevents_in, local_rank=None) for f in input_files]
+if not input_files:
+    raise ValueError("No data found in the specified input files.")
+arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, local_rank=None)
 
 print_process_memory("After loading data")
 
-if len(arr_data) == 0:
-    raise ValueError("No data found in the specified input files.")
-
 log.write('Data parameters from {first_file}:\n')
-for key in arr_data[0].keys():
+for key in arr_data.keys():
     if key not in ('arr','tau_freezeout', 'ntau_freezeout'):
-        log.write(f'  {key}: {arr_data[0][key]}\n')
+        log.write(f'  {key}: {arr_data[key]}\n')
 
-# -------------------------------------------------------------------------------------------------------------------
-# REAMRK JP: check later ... for split up training into smaller chunks ... lets try first
-# small system full evolution, smaller settings and batch size max 1-2 ... !!!!
-
-# Maybe really flatten data via C++ or outhervise using akward to pad things takes quite some time and memory ... !!!
-
-# -------------------------------------------------------------------------------------------------------------------
-
-# if len(arr_data) > 1:
-#     arrays = [d['arr'] for d in arr_data]
-#     arr = np.concatenate(arrays, axis=0)
-#     ntau_start = np.concatenate([d['ntau_start'] for d in arr_data], axis=0)
-# else:
-#     arr = arr_data[0]['arr']
-#     ntau_start = arr_data[0]['ntau_start']
-
-# -------------------------------------------------------------------------------------------------------------------
-
-# REAMRK JP: this is still stupid an stranges, check bulkwriter too!!!!
-# keep the vz values
-# average over the eta direction but keep the dimension
-# keep 4 of the eta slices (out of 5)
-#arr = arr[:, :, xyslice, xyslice, tauslice, :]
-# drop the fourth axis
-# arr = arr.mean(axis=4)
-# add it back in again as a single eta slice (the value of which is irrelevant)
-# arr = arr[:,:,:,:, np.newaxis, :]
-
-# -------------------------------------------------------------------------------------------------------------------
-
-arr = arr_data[0]['arr']
+arr = arr_data['arr']
 arr = arr[:, :, xyslice, xyslice, tauslice, :]
 
 print_process_memory("After slicing data")

@@ -6,7 +6,7 @@ import numpy as np
 
 def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
                  storage_options=None, verbose=False):
-    ''' read events from a 3d root file
+    ''' read events from a 3d root file; file_path may be a single path or a list of paths
     returns:
       {'data' : 6D numpy array,
        'tau0' : 1D numpy array of initial tau values,
@@ -17,42 +17,60 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
     if verbose:
         tracemalloc.start()
 
-    _is_remote = isinstance(file_path, str) and file_path.startswith(("s3://", "gs://", "http://", "https://"))
-    if not _is_remote and not os.path.exists(file_path):
-        raise FileNotFoundError(f"File {file_path} does not exist.")
-    open_kwargs = storage_options if storage_options else {}
-    file = up.open(file_path, **open_kwargs)
+    # Normalize to list so multi-file and single-file share the same code path
+    if isinstance(file_path, (str, bytes)):
+        file_paths = [file_path]
+    else:
+        file_paths = list(file_path)
 
+    open_kwargs = storage_options if storage_options else {}
+
+    for fp in file_paths:
+        _is_remote = isinstance(fp, str) and fp.startswith(("s3://", "gs://", "http://", "https://"))
+        if not _is_remote and not os.path.exists(fp):
+            raise FileNotFoundError(f"File {fp} does not exist.")
+
+    # Scalar metadata is read from the first file (assumed consistent across files)
+    file0 = up.open(file_paths[0], **open_kwargs)
     dat = {
-        'nFeatures' : file['nFeatures'].member('fVal'),
-        'nx' : file['nx'].member('fVal'),
-        #'NT' : file['NT'].member('fVal'), #JP: Check!!!!!
-        'ny' : file['ny'].member('fVal'),
-        'neta' : file['neta'].member('fVal'),
-        'x_min' : file['x_min'].member('fVal'),
-        'y_min' : file['y_min'].member('fVal'),
-        'eta_min' : file['eta_min'].member('fVal'),
-        'dx' : file['dx'].member('fVal'),
-        'dy' : file['dy'].member('fVal'),
-        'deta' : file['deta'].member('fVal'),
-        'tau_min' : file['tau_min'].member('fVal'),
-        'tau_min_MUSIC' : file['tau_min_MUSIC'].member('fVal'),
-        'dtau' : file['dtau'].member('fVal'),
-        'ntau' : file['ntau'].member('fVal'), # if variable length, then is 0
+        'nFeatures' : file0['nFeatures'].member('fVal'),
+        'nx' : file0['nx'].member('fVal'),
+        'ny' : file0['ny'].member('fVal'),
+        'neta' : file0['neta'].member('fVal'),
+        'x_min' : file0['x_min'].member('fVal'),
+        'y_min' : file0['y_min'].member('fVal'),
+        'eta_min' : file0['eta_min'].member('fVal'),
+        'dx' : file0['dx'].member('fVal'),
+        'dy' : file0['dy'].member('fVal'),
+        'deta' : file0['deta'].member('fVal'),
+        'tau_min' : file0['tau_min'].member('fVal'),
+        'tau_min_MUSIC' : file0['tau_min_MUSIC'].member('fVal'),
+        'dtau' : file0['dtau'].member('fVal'),
+        'ntau' : file0['ntau'].member('fVal'), # if variable length, then is 0
     }
 
     if verbose:
         current, peak = tracemalloc.get_traced_memory()
         print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
 
-    dat['tau_freezeout'] = ak.to_numpy(file['t']['tau_freezeout'].array(library='ak'))
-    dat['ntau_freezeout'] = ak.to_numpy(file['t']['ntau_freezeout'].array(library='ak'))
+    # Chain all files so ntau_freezeout reflects the global max across every file —
+    # this is critical for consistent padding when file_paths has more than one entry
+    tree_paths = [f"{fp}:t" for fp in file_paths]
+    combined_meta = up.concatenate(tree_paths,
+                                   filter_name=["tau_freezeout", "ntau_freezeout"],
+                                   **open_kwargs)
+    dat['tau_freezeout'] = ak.to_numpy(combined_meta['tau_freezeout'])
+    dat['ntau_freezeout'] = ak.to_numpy(combined_meta['ntau_freezeout'])
 
     print('Grid parameters:')
     print(f"  nx: {dat['nx']}, ny: {dat['ny']}, neta: {dat['neta']}, ntau: {dat['ntau']}")
     print(f"  x_min: {dat['x_min']}, y_min: {dat['y_min']}, eta_min: {dat['eta_min']}")
     print(f"  dx: {dat['dx']}, dy: {dat['dy']}, deta: {dat['deta']}, tau_min: {dat['tau_min']}, dtau: {dat['dtau']}")
     print(f"  ntau_freezeout: {dat['ntau_freezeout']}, tau_min_MUSIC: {dat['tau_min_MUSIC']}")
+
+    # Total entries across all chained files
+    total_entries = len(dat['ntau_freezeout'])
+    print(f'Total events available across {len(file_paths)} file(s): {total_entries}')
 
     if local_rank is not None:
         half = nevents // 2
@@ -62,20 +80,25 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
         start_event = 0
         end_event = nevents
 
+    use_flat = 'flat_data' in file0['t'].keys()
 
-    if 'flat_data' in file['t'].keys():
+    if use_flat:
         print("reading flat_data")
-        branch = file['t']['flat_data']
-        nentries = branch.num_entries
         if end_event <= 0:
-            end_event = nentries
-        elif end_event > nentries:
-            print(f'Requested more events ({end_event}) than available({nentries}); so using max available ({nentries})')
-            end_event = nentries
-        dat['ntau_start'] = file['t']['ntau_start'].array(entry_stop=end_event,library='np')
-        dat['ntau'] = file['NT'].member('fVal')
+            end_event = total_entries
+        elif end_event > total_entries:
+            print(f'Requested more events ({end_event}) than available ({total_entries}); using max available ({total_entries})')
+            end_event = total_entries
+        print(f'Selected events: {end_event - start_event}')
 
-        arr = branch.array(entry_start=start_event,entry_stop=end_event,library='np').astype(np.float32)
+        flat_combined = up.concatenate(tree_paths,
+                                       filter_name=["flat_data", "ntau_start"],
+                                       entry_stop=end_event,
+                                       **open_kwargs)
+        dat['ntau_start'] = ak.to_numpy(flat_combined['ntau_start'])
+        dat['ntau'] = file0['NT'].member('fVal')
+
+        arr = ak.to_numpy(flat_combined['flat_data'][start_event:end_event]).astype(np.float32)
         ex_size = dat['ntau']*dat['nx']*dat['ny']*dat['neta']*dat['nFeatures']
 
         if arr.shape[-1] != ex_size:
@@ -106,29 +129,23 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
             tracemalloc.stop()
         return dat
     else:
-        ''' must be reading straight from .root, presumable with variable length tau dimension'''
-        branch = file['t']['user_res']
+        ''' must be reading straight from .root, presumably with variable length tau dimension'''
+        # choose_ntau must be the global max so padding is consistent across all files
         if not choose_ntau:
-            choose_ntau = np.max(dat['ntau_freezeout'])
-
-        nentries = branch.num_entries
-
-        if verbose:
-            current, peak = tracemalloc.get_traced_memory()
-            print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+            choose_ntau = int(np.max(dat['ntau_freezeout']))
 
         if nevents <= 0:
-            nevents = nentries
-        elif nevents > nentries:
-            print(f'Requested more events ({nevents}) than available({nentries}); so using max available ({nentries})')
-            nevents = nentries
-
-        target_len = int(dat['nx']*dat['ny']*dat['neta']*dat['nFeatures']*choose_ntau)
-        print(f'There were {nevents} events')
+            nevents = total_entries
+        elif nevents > total_entries:
+            print(f'Requested more events ({nevents}) than available ({total_entries}); using max available ({total_entries})')
+            nevents = total_entries
+        print(f'Selected events: {nevents}')
 
         if verbose:
             current, peak = tracemalloc.get_traced_memory()
             print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
+
+        target_len = int(dat['nx']*dat['ny']*dat['neta']*dat['nFeatures']*choose_ntau)
         print(f"Processing {nevents} events with variable-length tau dimension; padding to {choose_ntau} taus per event (total size per event: {target_len} entries)")
 
         # Allocate the full output array once, up front
@@ -140,17 +157,23 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
             current, peak = tracemalloc.get_traced_memory()
             print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
 
-        # Process in chunks to bound peak memory
+        # uproot.iterate chains multiple files transparently; step_size controls peak memory.
+        # entry_stop in iterate is per-file, so we enforce the global cap by clipping each chunk.
         chunk_size = nevents // 10 if nevents >= 10 else 1
-        for start in range(0, nevents, chunk_size):
-            print(f"Processing events {start} to {min(start + chunk_size, nevents)}...")
-            stop = min(start + chunk_size, nevents)
+        out_idx = 0
+        for chunk in up.iterate(tree_paths, filter_name="user_res",
+                                step_size=chunk_size, **open_kwargs):
+            remaining = nevents - out_idx
+            if remaining <= 0:
+                break
+            arr_ak = chunk['user_res'][:remaining]  # clip last partial chunk to exact count
+            n_chunk = len(arr_ak)
+            print(f"Processing events {out_idx} to {out_idx + n_chunk}...")
 
             if verbose:
                 current, peak = tracemalloc.get_traced_memory()
                 print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
 
-            arr_ak = branch.array(entry_start=start, entry_stop=stop)
             padded = ak.to_numpy(
                 ak.fill_none(ak.pad_none(arr_ak, target_len, axis=-1, clip=True),
                             np.float32(0.))
@@ -159,10 +182,15 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
             if verbose:
                 current, peak = tracemalloc.get_traced_memory()
                 print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
-            # write directly into the pre-allocated slice — no accumulation
-            arr[start:stop] = padded.reshape(
-                stop - start, choose_ntau, dat['nx'], dat['ny'], dat['neta'], dat['nFeatures']
+
+            arr[out_idx:out_idx + n_chunk] = padded.reshape(
+                n_chunk, choose_ntau, dat['nx'], dat['ny'], dat['neta'], dat['nFeatures']
             )
+            out_idx += n_chunk
+            if out_idx >= nevents:
+                del arr_ak, padded
+                break
+
             if verbose:
                 current, peak = tracemalloc.get_traced_memory()
                 print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
