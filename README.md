@@ -21,7 +21,6 @@ Two parallel training stacks are provided:
 
 ## Table of Contents
 
-- [Repository layout](#repository-layout)
 - [Installation](#installation)
   - [Prerequisites](#prerequisites)
   - [One-shot install](#one-shot-install)
@@ -48,96 +47,8 @@ Two parallel training stacks are provided:
   - [`loc_libs` — data I/O helpers](#loc_libs--data-io-helpers)
 - [Tests](#tests)
 - [Porting status (PyTorch → MLX)](#porting-status-pytorch--mlx)
+- [Repository layout](#repository-layout)
 - [Credits and Attribution](#credits-and-attribution)
-
----
-
-## Repository layout
-
-```
-FNO4d/
-├── README_train.md              # training scripts — parameters, data format, outputs
-├── README_train_gcs.md          # GCS training — cloud data, streaming vs download, IAM setup
-├── README_eval.md               # evaluation / inference scripts — UI controls, outputs, examples
-├── README_eval_metric.md        # ModelEval metric suite — math, diagnostics, API reference
-├── README_mlx.md                # MLX port overview — setup, differences from PyTorch stack
-├── PORTING_NOTES.md             # technical notes for continuing the neuralop → MLX port
-├── install.sh                   # install into current env (inherits system packages)
-├── install_full.sh              # create a fresh isolated env (conda or virtualenv)
-├── install_kernel.sh            # register active env as a Jupyter kernel
-├── install_marimo.sh            # install marimo into the active env (optional)
-├── check_install.sh             # pre-flight checks for install.sh (mirrors its probes)
-├── check_install_full.sh        # pre-flight checks for install_full.sh
-├── setup_nbstripout.sh          # install nbstripout and register git filter for notebooks
-├── requirements-base.txt        # shared deps (both platforms)
-├── requirements-mac.txt         # Mac Silicon: adds torch + mlx
-├── requirements-linux.txt       # Linux/Lambda: adds nothing (torch auto-detected)
-├── requirements-s3.txt          # opt-in: S3 / S3-compatible (--s3 flag)
-├── requirements-gcs.txt         # opt-in: Google Cloud Storage (--gcs flag)
-│
-├── neuralop_mlx/                # MLX FNO implementation (Apple Silicon)
-│   ├── models/fno.py            # FNO model (N-dimensional)
-│   ├── layers/                  # spectral conv, channel MLP, embeddings, …
-│   ├── training/                # Trainer, AdamW, LpLoss, H1Loss
-│   └── weight_transfer.py       # load_from_torch() — PyTorch → MLX weight migration
-│
-├── neuraloperator-4d-2.0.0/     # PyTorch neuraloperator (local 4D fork)
-│
-├── tests/                       # MLX unit and integration tests
-│   ├── test_fno_model_mlx.py    # forward-pass shape and output checks for MLX FNO
-│   ├── test_layers_mlx.py       # spectral conv, channel MLP, embedding layer tests
-│   ├── test_training_mlx.py     # one-step training loop smoke test (MLX)
-│   ├── test_weight_transfer.py  # PyTorch → MLX weight transfer correctness
-│   └── test_compare_torch_mlx.py # numerical parity check: PyTorch vs MLX outputs
-│
-├── loc_libs/                    # local helper library (data I/O, normalisation, utilities)
-│   ├── read_3d_root.py          # read events from ROOT files (local or cloud)
-│   ├── read_3d_hdf5.py          # ROOT → HDF5 conversion + streaming reads
-│   ├── root_pytorch_loader.py   # IterableDataset for large ROOT files
-│   ├── fluid_datasets.py        # in-memory PyTorch Dataset classes
-│   ├── training_utils.py        # RunLog and shared training helpers
-│   ├── parse_training_log.py    # parse and plot training-loss logs
-│   ├── memory_utils.py          # memory profiling utilities
-│   ├── NormFn3d.py              # physics-motivated normalisation functions and inverses
-│   ├── NormFn.py                # older 3-channel normalizers (pre-NormFn3d, backward compat)
-│   ├── README_NormFn3d.md       # extended docs for the NormFn3d normalizer family
-│   ├── norm_utils.py            # stateful Normalizer wrapper (fit/transform/inverse/save/load)
-│   ├── gcs_utils.py             # GCS helpers: streaming storage_options + file download (opt-in)
-│   ├── skinnycontour.py         # skinny-contour CDF overlay utilities
-│   ├── cont.py                  # low-level contour mask helpers (backend for skinnycontour)
-│   ├── contour_v_plot.py        # velocity-channel contour plotting
-│   ├── plot_imshow.py           # imshow-based field snapshot plotting helpers
-│   └── model_eval.py            # ModelEval — full metric suite (nRMSE, fRMSE, MELR, WLR, …)
-│
-├── train/                       # training entry points and evaluation notebooks
-    ├── test_train.py            # PyTorch training script (hardcoded params)
-    ├── test_train.ipynb         # PyTorch training notebook
-    ├── test_train_mlx.py        # MLX training script (hardcoded params, Mac)
-    ├── test_train_mlx.ipynb     # MLX training notebook (Mac)
-    ├── test_train_yaml.py       # PyTorch training script (YAML config)
-    ├── test_train_mlx_yaml.py   # MLX training script (YAML config, Mac)
-    ├── test_train_yaml_norm.py  # PyTorch training script (YAML config + normalisation)
-    ├── test_train_mlx_yaml_norm.py # MLX training script (YAML config + normalisation, Mac)
-    ├── config_test_train.yaml   # shared YAML config for all YAML-based scripts
-    ├── test_train_hdf5.ipynb    # HDF5-backed PyTorch training notebook
-    ├── test_mem_data_load.py    # memory profiling — ROOT loader
-    ├── test_mem_data_load_hdf5.py # memory profiling — HDF5 loader
-    ├── apply.py                 # marimo inference app
-    ├── eval_model_test_torch.py # PyTorch eval — imshow field snapshots
-    ├── eval_model_test_mlx.py   # MLX eval — imshow field snapshots
-    ├── eval_model_test_cont_torch.py  # PyTorch eval — skinnycontour CDF contours
-    ├── eval_model_test_cont_mlx.py    # MLX eval — skinnycontour CDF contours
-    ├── eval_model_test_metric_torch.py # PyTorch eval — full ModelEval metric suite
-    └── eval_model_test_metric_mlx.py   # MLX eval — full ModelEval metric suite
-│
-└── train_gcs/                   # GCS-backed training scripts (data stays in the bucket)
-    ├── test_train_yaml_norm_gcs_stream.py     # PyTorch — stream directly from gs://
-    ├── test_train_mlx_yaml_norm_gcs_stream.py # MLX — stream directly from gs://
-    ├── test_train_yaml_norm_gcs_download.py   # PyTorch — download to local_data_dir first
-    ├── test_train_mlx_yaml_norm_gcs_download.py # MLX — download to local_data_dir first
-    ├── config_gcs_stream.yaml   # example config for streaming scripts
-    └── config_gcs_download.yaml # example config for download scripts
-```
 
 ---
 
@@ -882,3 +793,96 @@ The MLX port is an independent reimplementation of the FNO and its training infr
 stack on Apple Silicon.  It is not a mechanical translation of the upstream `neuraloperator`
 source.  Weight transfer from trained PyTorch checkpoints is supported via `load_from_torch`
 (see [README_mlx.md](README_mlx.md) and [PORTING_NOTES.md](PORTING_NOTES.md)).
+
+---
+
+## Repository layout
+
+```
+FNO4d/
+├── README_train.md              # training scripts — parameters, data format, outputs
+├── README_train_gcs.md          # GCS training — cloud data, streaming vs download, IAM setup
+├── README_eval.md               # evaluation / inference scripts — UI controls, outputs, examples
+├── README_eval_metric.md        # ModelEval metric suite — math, diagnostics, API reference
+├── README_mlx.md                # MLX port overview — setup, differences from PyTorch stack
+├── PORTING_NOTES.md             # technical notes for continuing the neuralop → MLX port
+├── install.sh                   # install into current env (inherits system packages)
+├── install_full.sh              # create a fresh isolated env (conda or virtualenv)
+├── install_kernel.sh            # register active env as a Jupyter kernel
+├── install_marimo.sh            # install marimo into the active env (optional)
+├── check_install.sh             # pre-flight checks for install.sh (mirrors its probes)
+├── check_install_full.sh        # pre-flight checks for install_full.sh
+├── setup_nbstripout.sh          # install nbstripout and register git filter for notebooks
+├── requirements-base.txt        # shared deps (both platforms)
+├── requirements-mac.txt         # Mac Silicon: adds torch + mlx
+├── requirements-linux.txt       # Linux/Lambda: adds nothing (torch auto-detected)
+├── requirements-s3.txt          # opt-in: S3 / S3-compatible (--s3 flag)
+├── requirements-gcs.txt         # opt-in: Google Cloud Storage (--gcs flag)
+│
+├── neuralop_mlx/                # MLX FNO implementation (Apple Silicon)
+│   ├── models/fno.py            # FNO model (N-dimensional)
+│   ├── layers/                  # spectral conv, channel MLP, embeddings, …
+│   ├── training/                # Trainer, AdamW, LpLoss, H1Loss
+│   └── weight_transfer.py       # load_from_torch() — PyTorch → MLX weight migration
+│
+├── neuraloperator-4d-2.0.0/     # PyTorch neuraloperator (local 4D fork)
+│
+├── tests/                       # MLX unit and integration tests
+│   ├── test_fno_model_mlx.py    # forward-pass shape and output checks for MLX FNO
+│   ├── test_layers_mlx.py       # spectral conv, channel MLP, embedding layer tests
+│   ├── test_training_mlx.py     # one-step training loop smoke test (MLX)
+│   ├── test_weight_transfer.py  # PyTorch → MLX weight transfer correctness
+│   └── test_compare_torch_mlx.py # numerical parity check: PyTorch vs MLX outputs
+│
+├── loc_libs/                    # local helper library (data I/O, normalisation, utilities)
+│   ├── read_3d_root.py          # read events from ROOT files (local or cloud)
+│   ├── read_3d_hdf5.py          # ROOT → HDF5 conversion + streaming reads
+│   ├── root_pytorch_loader.py   # IterableDataset for large ROOT files
+│   ├── fluid_datasets.py        # in-memory PyTorch Dataset classes
+│   ├── training_utils.py        # RunLog and shared training helpers
+│   ├── parse_training_log.py    # parse and plot training-loss logs
+│   ├── memory_utils.py          # memory profiling utilities
+│   ├── NormFn3d.py              # physics-motivated normalisation functions and inverses
+│   ├── NormFn.py                # older 3-channel normalizers (pre-NormFn3d, backward compat)
+│   ├── README_NormFn3d.md       # extended docs for the NormFn3d normalizer family
+│   ├── norm_utils.py            # stateful Normalizer wrapper (fit/transform/inverse/save/load)
+│   ├── gcs_utils.py             # GCS helpers: streaming storage_options + file download (opt-in)
+│   ├── skinnycontour.py         # skinny-contour CDF overlay utilities
+│   ├── cont.py                  # low-level contour mask helpers (backend for skinnycontour)
+│   ├── contour_v_plot.py        # velocity-channel contour plotting
+│   ├── plot_imshow.py           # imshow-based field snapshot plotting helpers
+│   └── model_eval.py            # ModelEval — full metric suite (nRMSE, fRMSE, MELR, WLR, …)
+│
+├── train/                       # training entry points and evaluation notebooks
+│   ├── test_train.py            # PyTorch training script (hardcoded params)
+│   ├── test_train.ipynb         # PyTorch training notebook
+│   ├── test_train_mlx.py        # MLX training script (hardcoded params, Mac)
+│   ├── test_train_mlx.ipynb     # MLX training notebook (Mac)
+│   ├── test_train_yaml.py       # PyTorch training script (YAML config)
+│   ├── test_train_mlx_yaml.py   # MLX training script (YAML config, Mac)
+│   ├── test_train_yaml_norm.py  # PyTorch training script (YAML config + normalisation)
+│   ├── test_train_mlx_yaml_norm.py # MLX training script (YAML config + normalisation, Mac)
+│   ├── config_test_train.yaml   # shared YAML config for all YAML-based scripts
+│   ├── test_train_hdf5.ipynb    # HDF5-backed PyTorch training notebook
+│   ├── test_mem_data_load.py    # memory profiling — ROOT loader
+│   ├── test_mem_data_load_hdf5.py # memory profiling — HDF5 loader
+│   ├── apply.py                 # marimo inference app
+│   ├── eval_model_test_torch.py # PyTorch eval — imshow field snapshots
+│   ├── eval_model_test_mlx.py   # MLX eval — imshow field snapshots
+│   ├── eval_model_test_cont_torch.py  # PyTorch eval — skinnycontour CDF contours
+│   ├── eval_model_test_cont_mlx.py    # MLX eval — skinnycontour CDF contours
+│   ├── eval_model_test_metric_torch.py # PyTorch eval — full ModelEval metric suite
+│   └── eval_model_test_metric_mlx.py   # MLX eval — full ModelEval metric suite
+│
+├── train_gcs/                   # GCS-backed training scripts (data stays in the bucket)
+│   ├── test_train_yaml_norm_gcs_stream.py     # PyTorch — stream directly from gs://
+│   ├── test_train_mlx_yaml_norm_gcs_stream.py # MLX — stream directly from gs://
+│   ├── test_train_yaml_norm_gcs_download.py   # PyTorch — download to local_data_dir first
+│   ├── test_train_mlx_yaml_norm_gcs_download.py # MLX — download to local_data_dir first
+│   ├── config_gcs_stream.yaml   # example config for streaming scripts
+│   └── config_gcs_download.yaml # example config for download scripts
+│
+└── train_generic/               # unified training script (backend + data source from YAML)
+    ├── train.py                 # single entry point for all six backend × data-source modes
+    └── config.yaml              # template config — set backend and data_source to switch modes
+```
