@@ -15,8 +15,8 @@
 # ---------------------------------------------------------------------------
 
 # --- mode selection ---
-backend:     torch        # torch | mlx
-data_source: local        # local | gcs_download | gcs_stream
+backend:     mlx        # torch | mlx
+data_source: gcs_download        # local | gcs_download | gcs_stream
 
 # --- output ---
 odir:      ./out          # logs, metrics, training curves
@@ -24,27 +24,28 @@ model_dir: ./checkpoints  # best_model.safetensors and periodic checkpoints
 
 # --- input data ---
 # [local] directory prepended to each entry in input_files
-input_dir: /path/to/data
+input_dir: ../data
 
 # For local:        bare filenames  (e.g. dAu_25ev_mb.root)
 # For gcs_*:        full gs:// URIs (e.g. gs://my-bucket/data/file.root)
 input_files:
-  - dAu_25ev_mb.root
+  - gs://test_fno/dAu_25ev_mb.root
+  #- dAu_25ev_mb.root
 
 nevents_in: 10            # events to load (-1 = all)
 
 # --- GCS authentication [gcs] ---
-# gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
+gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
 
 # --- GCS download cache [download] ---
-# local_data_dir:    ../data  # directory where downloaded files are cached
-# overwrite_cache:   false    # true = re-download even if size matches
-# gcs_show_progress: null     # null=auto  true=always  false=never
+local_data_dir:    ../data  # directory where downloaded files are cached
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
 
 # --- post-training GCS upload [gcs] ---
 # If set, odir is uploaded to {gcs_output_prefix}/logs after training.
 # Remove or set to null to skip.
-# gcs_output_prefix: gs://my-bucket/runs/run01
+gcs_output_prefix: gs://test_fno/runs/run01
 
 # --- normalisation ---
 normalization:

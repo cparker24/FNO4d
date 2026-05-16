@@ -390,5 +390,6 @@ if data_source in ('gcs_download', 'gcs_stream') and gcs_output_prefix:
     log(f'Uploading outputs to GCS: {gcs_output_prefix}')
     if log._f:
         log._f.flush()
+    #upload_gcs_dir(model_dir, f'{gcs_output_prefix}/checkpoints', gcs_key_file)
     upload_gcs_dir(odir, f'{gcs_output_prefix}/logs', gcs_key_file)
     log(f'GCS upload complete → {gcs_output_prefix}')
