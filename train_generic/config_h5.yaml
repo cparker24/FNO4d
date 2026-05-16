@@ -1,0 +1,101 @@
+# ---------------------------------------------------------------------------
+# FNO training config — HDF5 multi-file input
+#
+# Usage:
+#   python train_h5.py [--config config_h5.yaml]
+#
+# Two keys select the execution mode:
+#   backend:     torch | mlx
+#   data_source: local | gcs_download
+#
+# Keys marked [local]    are only read when data_source is local.
+# Keys marked [download] are only read when data_source is gcs_download.
+# Keys marked [lazy]     only matter when lazy: true.
+# Keys marked [eager]    only matter when lazy: false.
+# All other keys behave identically to config.yaml (ROOT-based training).
+# ---------------------------------------------------------------------------
+
+# --- mode selection --------------------------------------------------------
+backend:     mlx          # torch | mlx
+data_source: gcs_download        # local | gcs_download
+                          # (gcs_stream is not supported: h5py requires local paths)
+
+# --- output ----------------------------------------------------------------
+odir:      ./out          # logs, metrics, training curves
+model_dir: ./checkpoints  # best_model.safetensors and periodic checkpoints
+
+# --- input data (HDF5) -----------------------------------------------------
+# [local]    bare filenames; hdf5_dir is prepended to each entry
+# [download] full gs:// URIs; files are downloaded to local_data_dir first
+hdf5_dir: ../data         # [local] directory containing .h5 files
+
+# Pre-converted .h5 files from convert_root_to_hdf5().
+# All files must share grid dimensions (nFeatures, nx, ny, neta, ntau);
+# a ValueError is raised on mismatch.  Files are concatenated in order.
+hdf5_files:
+  #- dAu_25ev_mb.h5
+  # - dAu_25ev_mb_2.h5             # [local]    add more files here
+  - gs://test_fno/dAu_25ev_mb.h5  # [download] use gs:// URIs instead
+  - gs://test_fno/dAu_25ev_mb_2.h5 
+
+nevents_in:  10   # events to load (-1 = all across all files)
+start_event:  0   # first global event index
+
+# --- GCS authentication [download] -----------------------------------------
+gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
+
+# --- GCS download cache [download] -----------------------------------------
+local_data_dir:    ../data  # directory where downloaded .h5 files are cached
+overwrite_cache:   false    # true = re-download even if file size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- GCS output upload (optional) ------------------------------------------
+# Applies to both data_source modes.  Set gcs_output_prefix to upload odir
+# (logs, curves, metrics) after training.  Remove or set to null to skip.
+gcs_output_prefix: gs://test_fno/runs/run02
+
+# --- loading strategy ------------------------------------------------------
+# true  [lazy]  → dat['arr'] is a MultiH5Array.  Data is read from disk
+#                 only when sliced — one batch at a time during the training
+#                 loop.  Peak RAM ≈ one batch.  Best for large datasets.
+# false [eager] → dat['arr'] is a contiguous ndarray loaded immediately.
+#                 Faster per-epoch iteration; requires enough RAM for the
+#                 full dataset.
+lazy: true
+
+# --- normalisation ---------------------------------------------------------
+# In lazy mode: analytic normalizers (none, etau75_3d, cosh_etau75_3d) are
+#   applied per-event inside __getitem__ with zero up-front cost.
+#   Data-driven normalizers (etau75_eta_3d, etau75_eta_shape_3d) materialise
+#   the training split once to compute their reference, then apply per-event.
+# In eager mode: normalizer is applied to the full materialised arrays before
+#   the training loop, same as the ROOT-based train.py.
+normalization:
+  name: none              # none | etau75_3d | etau75_eta_3d |
+                          # etau75_eta_shape_3d | cosh_etau75_3d
+  # alpha: 1.0            # only used by cosh_etau75_3d
+
+# --- data preparation ------------------------------------------------------
+train_ratio: 0.8
+xyslice:  [null, -1]      # slice(None, -1) — drop last spatial bin
+tauslice: [null, -1]      # slice(None, -1) — drop last tau/neta bin
+
+# --- model -----------------------------------------------------------------
+hidden_channels: 16
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training --------------------------------------------------------------
+n_epochs: 3
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip saves before this epoch; null = from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [10]    # eval batch size per test resolution
+
+# --- optimizer -------------------------------------------------------------
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---------------------------------------------------------------
+log_directly: true        # mirror stdout to training.log / training_mlx.log

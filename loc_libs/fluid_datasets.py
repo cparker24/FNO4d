@@ -70,32 +70,42 @@ class _FluidDatasetH5Base(Dataset):
 
     Parameters
     ----------
-    data     : ndarray or MultiH5Array
-                Full event array with shape (nevents, nFeatures, nx, ny, neta, ntau).
-    indices  : array-like or None
-                Global event indices to expose.  None = all events.
-                Pass np.arange(n_train) / np.arange(n_train, n_total) to express
-                train/val splits without slicing the source array.
-    xyslice  : slice or None
-                Applied to the nx and ny axes of each event.  None = no trim.
-    tauslice : slice or None
-                Applied to the neta axis of each event.  None = no trim.
+    data       : ndarray or MultiH5Array
+                  Full event array with shape (nevents, nFeatures, nx, ny, neta, ntau).
+    indices    : array-like or None
+                  Global event indices to expose.  None = all events.
+                  Pass np.arange(n_train) / np.arange(n_train, n_total) to express
+                  train/val splits without slicing the source array.
+    xyslice    : slice or None
+                  Applied to the nx and ny axes of each event.  None = no trim.
+    tauslice   : slice or None
+                  Applied to the neta axis of each event.  None = no trim.
+    normalizer : Normalizer or None
+                  When set, normalizer.transform(ev) is applied per event inside
+                  __getitem__.  Use this in lazy mode so the transform runs on
+                  each disk-read batch rather than on the full array up-front.
+                  For eager mode (full array already normalised), leave as None.
     """
 
-    def __init__(self, data, indices=None, xyslice=None, tauslice=None):
-        self.data     = data
-        self.indices  = np.asarray(indices, dtype=np.intp) if indices is not None else None
-        self.xyslice  = xyslice  if xyslice  is not None else slice(None)
-        self.tauslice = tauslice if tauslice is not None else slice(None)
-        self.n_samples = len(indices) if indices is not None else len(data)
-        sample = self._get_raw(0)
-        self.time_steps = sample.shape[-1]
+    def __init__(self, data, indices=None, xyslice=None, tauslice=None, normalizer=None):
+        self.data        = data
+        self.indices     = np.asarray(indices, dtype=np.intp) if indices is not None else None
+        self.xyslice     = xyslice  if xyslice  is not None else slice(None)
+        self.tauslice    = tauslice if tauslice is not None else slice(None)
+        self._normalizer = normalizer if (normalizer is not None and
+                                          getattr(normalizer, 'name', 'none') != 'none') else None
+        self.n_samples   = len(indices) if indices is not None else len(data)
+        sample           = self._get_raw(0)
+        self.time_steps  = sample.shape[-1]
         print(f'{type(self).__name__}: n_samples={self.n_samples}  event_shape={sample.shape}')
 
     def _get_raw(self, local_idx):
         gi = int(self.indices[local_idx]) if self.indices is not None else local_idx
         ev = self.data[gi]   # (nFeatures, nx, ny, neta, ntau)
-        return ev[:, self.xyslice, self.xyslice, self.tauslice, :]
+        ev = ev[:, self.xyslice, self.xyslice, self.tauslice, :]
+        if self._normalizer is not None:
+            ev = self._normalizer.transform(ev[np.newaxis])[0]
+        return ev
 
     def __len__(self):
         return self.n_samples

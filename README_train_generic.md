@@ -1,17 +1,27 @@
 # train_generic — Unified FNO Training Script
 
-A single training script that replaces the per-mode scripts in `train/` and
-`train_gcs/`.  All six combinations of backend and data source are selected
-from the YAML config file — no code changes required.
+Two training scripts cover all supported input formats:
+
+| Script | Input format | Config |
+|--------|-------------|--------|
+| `train.py` | ROOT files (`.root`) — local or GCS | `config.yaml` |
+| `train_h5.py` | Pre-converted HDF5 files (`.h5`) | `config_h5.yaml` |
 
 ## Quick start
 
 ```bash
 cd train_generic
+
+# ROOT-based (local or GCS)
 python train.py --config config.yaml
+
+# HDF5-based (multiple files, lazy or eager)
+python train_h5.py --config config_h5.yaml
 ```
 
-## Mode selection
+## train.py — ROOT input
+
+### Mode selection
 
 Two keys at the top of `config.yaml` steer the run:
 
@@ -29,7 +39,62 @@ data_source: local        # local | gcs_download | gcs_stream
 | `torch`   | `gcs_stream`   | `train_gcs/test_train_yaml_norm_gcs_stream.py` |
 | `mlx`     | `gcs_stream`   | `train_gcs/test_train_mlx_yaml_norm_gcs_stream.py` |
 
-## Configuration reference
+## train_h5.py — HDF5 input
+
+`train_h5.py` reads pre-converted `.h5` files produced by
+`convert_root_to_hdf5()` (see `loc_libs/read_3d_hdf5.py`).  Multiple files
+are concatenated transparently — they must share the same grid dimensions
+(`nFeatures`, `nx`, `ny`, `neta`, `ntau`).
+
+### Why HDF5?
+
+ROOT stores branch data in baskets.  Without per-event basket flushing, uproot
+must decompress the entire basket even for a small slice, causing a ≈ 2× memory
+spike.  HDF5 with per-event chunks gives true random-access I/O: only the
+requested events are decompressed.
+
+### Converting ROOT → HDF5 (one-time)
+
+```python
+from read_3d_hdf5 import convert_root_to_hdf5
+
+convert_root_to_hdf5('dAu_250ev_mb.root', 'dAu_250ev_mb.h5',
+                     nevents=-1, chunk_events=1)
+```
+
+### Mode selection
+
+```yaml
+backend:     torch          # torch | mlx
+data_source: local          # local | gcs_download
+```
+
+`gcs_stream` is **not** supported for HDF5 because `h5py` requires local file
+paths.  When `data_source: gcs_download`, the `.h5` files are downloaded to
+`local_data_dir` first (re-runs skip the download if the file size matches),
+then read locally — identical caching behaviour to `train.py`.
+
+### Loading strategy (`lazy`)
+
+| `lazy` | `dat['arr']` type | Memory during training | I/O pattern |
+|--------|-------------------|------------------------|-------------|
+| `true` | `MultiH5Array` | ≈ one batch at a time | per-batch disk reads |
+| `false` | `numpy.ndarray` | full dataset in RAM | single up-front load |
+
+`lazy: true` is recommended for large datasets where RAM is the bottleneck.
+`lazy: false` is faster per-epoch once the data is loaded.
+
+### Normalisation in lazy mode
+
+| Normalizer | Fitting cost in lazy mode |
+|-----------|--------------------------|
+| `none` | zero — identity transform |
+| `etau75_3d`, `cosh_etau75_3d` | zero — analytic, applied per-event |
+| `etau75_eta_3d`, `etau75_eta_shape_3d` | one materialisation pass over the training split to compute the reference array; result is discarded and normalisation is applied per-event thereafter |
+
+---
+
+## Configuration reference — `config.yaml` (ROOT)
 
 All parameters live in `config.yaml`.  Keys that are unused in the active mode
 are silently ignored (e.g. `gcs_key_file` is ignored when `data_source: local`).
@@ -225,4 +290,96 @@ data_source:  gcs_stream
 gcs_key_file: ./fnotest-wayne-gcs.json
 input_files:
   - gs://my-bucket/data/dAu_25ev_mb.root
+```
+
+---
+
+## Configuration reference — `config_h5.yaml` (HDF5)
+
+All keys shared with `config.yaml` (model, training, optimizer, logging,
+normalisation, data preparation) behave identically.  The table below lists
+only the keys that differ or are new.
+
+### Input data
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `hdf5_dir` | `.` | Directory prepended to each entry in `hdf5_files` |
+| `hdf5_files` | — | List of `.h5` filenames; all must share grid dimensions |
+| `nevents_in` | `-1` | Events to load across all files combined; `-1` = all |
+| `start_event` | `0` | First global event index (useful for held-out test sets) |
+
+### Loading strategy
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `lazy` | `true` | `true` = `MultiH5Array` (on-demand reads); `false` = full ndarray |
+
+### GCS output upload (optional)
+
+HDF5 input files are always local.  Outputs (`odir`) can still be uploaded
+after training.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `gcs_key_file` | — | Service-account JSON key (only needed for upload) |
+| `gcs_output_prefix` | `null` | Upload `odir` to `{prefix}/logs`; `null` skips |
+| `gcs_show_progress` | `null` | `null` = auto, `true` = always, `false` = suppress |
+
+## Examples — HDF5
+
+### Single file, PyTorch, lazy
+
+```yaml
+backend:    torch
+hdf5_dir:   /data/flat
+hdf5_files:
+  - dAu_250ev_mb.h5
+lazy: true
+```
+
+### Multiple files, MLX, lazy
+
+```yaml
+backend:    mlx
+hdf5_dir:   /data/flat
+hdf5_files:
+  - dAu_250ev_mb.h5
+  - dAu_500ev_mb.h5
+lazy: true
+nevents_in: -1
+```
+
+### Multiple files, PyTorch, eager (full load)
+
+```yaml
+backend:    torch
+hdf5_dir:   /data/flat
+hdf5_files:
+  - dAu_250ev_mb.h5
+  - dAu_500ev_mb.h5
+lazy:        false
+nevents_in:  2000
+train_ratio: 0.8
+```
+
+### Multiple files, GCS download, PyTorch, lazy
+
+```yaml
+backend:        torch
+data_source:    gcs_download
+gcs_key_file:   ./fnotest-wayne-gcs.json
+local_data_dir: ../data
+hdf5_files:
+  - gs://my-bucket/data/dAu_250ev_mb.h5
+  - gs://my-bucket/data/dAu_500ev_mb.h5
+lazy: true
+```
+
+### Subset of events (e.g. skip first 500 for held-out test)
+
+```yaml
+lazy:        true
+start_event: 500
+nevents_in:  -1   # all events from index 500 onward
 ```
