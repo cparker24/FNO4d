@@ -303,7 +303,7 @@ trainer.train(train_loader=train_loader,
               eval_losses=eval_losses)
 
 if save_last:
-    save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, model_dir)
+    save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, model_dir, config_path=args.config)
 log_peak_memory(log, cuda=True)
 history.save(f'{odir}/metrics.json')
 history.plot(save_path=f'{odir}/training_curves.svg', title='FNO Training (GCS download)')

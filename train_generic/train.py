@@ -360,7 +360,7 @@ trainer.train(train_loader=train_loader,
               eval_losses=eval_losses)
 
 if save_last:
-    save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, model_dir)
+    save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, model_dir, config_path=args.config)
 
 if backend == 'torch':
     log_peak_memory(log, cuda=True)

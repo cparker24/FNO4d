@@ -225,7 +225,7 @@ trainer.train(
 )
 
 if save_last:
-    save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, model_dir)
+    save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, model_dir, config_path=args.config)
 log_peak_memory(log, mlx=True)
 history.save(f'{odir}/metrics_mlx.json')
 history.plot(save_path=f'{odir}/training_curves_mlx.svg', title='FNO Training (MLX)')

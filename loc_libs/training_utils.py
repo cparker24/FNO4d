@@ -109,7 +109,8 @@ def patch_trainer_logging(trainer, log_fn, history=None):
     trainer.log_eval = types.MethodType(_log_eval, trainer)
 
 
-def save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, save_dir):
+def save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, save_dir,
+                         config_path=None):
     """Save a complete training state so training can be resumed later.
 
     PyTorch : writes ``last_model.pt`` containing model, optimizer, and
@@ -118,10 +119,14 @@ def save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, save_dir):
               ``last_optimizer.safetensors`` (optimizer state), and
               ``last_state.json`` (epoch metadata).
 
+    If *config_path* is given the YAML config file is copied into *save_dir*
+    as ``config.yaml`` so the checkpoint is self-contained.
+
     To resume, call ``load_last_checkpoint`` at the start of the next run
     and adjust ``n_epochs`` to the remaining number of epochs.
     """
     import json
+    import shutil
     from pathlib import Path
 
     save_dir = Path(save_dir)
@@ -149,6 +154,9 @@ def save_last_checkpoint(trainer, optimizer, scheduler, n_epochs, save_dir):
         if scheduler is not None:
             state['scheduler_state_dict'] = scheduler.state_dict()
         torch.save(state, save_dir / 'last_model.pt')
+
+    if config_path is not None:
+        shutil.copy2(config_path, save_dir / 'config.yaml')
 
 
 def load_last_checkpoint(trainer, optimizer, scheduler, save_dir):
