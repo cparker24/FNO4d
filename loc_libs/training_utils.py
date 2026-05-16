@@ -191,6 +191,37 @@ def load_last_checkpoint(trainer, optimizer, scheduler, save_dir):
         return state['epoch'] + 1
 
 
+def patch_trainer_min_save_epoch(trainer, trainer_cls, min_save_epoch):
+    """Guard best-model and intermediate checkpoint saves until min_save_epoch.
+
+    Patches on_epoch_start (to track self.epoch) and wraps checkpoint so that
+    any save — whether triggered by save_best or checkpoint_freq — is skipped
+    before min_save_epoch is reached.  save_last is NOT affected.
+
+    Call this after patch_trainer_checkpoint (if both are used); it chains
+    cleanly with the existing on_epoch_start rather than replacing it.
+    """
+    import types
+
+    existing_oes = getattr(trainer, 'on_epoch_start', None)
+
+    def _on_epoch_start(self, epoch):
+        self.epoch = epoch
+        if existing_oes is not None:
+            existing_oes(epoch)
+
+    trainer.on_epoch_start = _on_epoch_start.__get__(trainer, trainer_cls)
+
+    original_checkpoint = trainer_cls.checkpoint
+
+    def _guarded_checkpoint(self, *args, **kwargs):
+        if getattr(self, 'epoch', 0) < min_save_epoch:
+            return
+        return original_checkpoint(self, *args, **kwargs)
+
+    trainer.checkpoint = _guarded_checkpoint.__get__(trainer, trainer_cls)
+
+
 def patch_trainer_checkpoint(trainer, trainer_cls, checkpoint_freq, odir,
                               optimizer=None):
     """Monkey-patch trainer.on_epoch_start to save checkpoints every checkpoint_freq epochs.

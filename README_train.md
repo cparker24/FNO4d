@@ -124,6 +124,7 @@ passed via `--config`).
 | `test_batch_sizes` | `[10]` | eval batch size per test resolution |
 | `eval_interval` | `2` | run evaluation every N training epochs |
 | `checkpoint_freq` | `None` | save a periodic checkpoint every N epochs; `None` disables |
+| `min_save_epoch` | `None` | skip `best_model` and periodic checkpoint saves until this epoch is reached; `None` saves from epoch 0; `save_last` is unaffected |
 | `save_last` | `True` | save a full resumable checkpoint after the last epoch |
 | `log_directly` | `True` | mirror all output to a log file (see Logging) |
 | `xyslice` | `[null, -1]` | YAML form of `slice(None, -1)` — drop last spatial bin |

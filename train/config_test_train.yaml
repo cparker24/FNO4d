@@ -34,6 +34,7 @@ n_modes: [32, 32, 16, 16]   # Fourier modes [x, y, eta, tau]
 n_epochs: 3
 batch_size: 1
 checkpoint_freq: null   # save checkpoint every N epochs; null = disabled
+min_save_epoch: null    # skip best_model and checkpoint saves before this epoch; null = save from epoch 0
 save_last: true         # save last epoch state to model_dir/last_model.* after training
 eval_interval: 2        # run evaluation every N epochs
 test_batch_sizes: [10]  # eval batch size per test resolution

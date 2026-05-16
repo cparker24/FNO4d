@@ -47,7 +47,7 @@ sys.path.insert(0, '../loc_libs')
 from read_3d_root import read_3d_data
 from fluid_datasets import FluidDatasetMLX
 from memory_utils import calculate_model_memory, reset_peak_memory, log_peak_memory
-from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint, save_last_checkpoint
+from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint, patch_trainer_min_save_epoch, save_last_checkpoint
 from parse_training_log import TrainingHistory
 from norm_utils import build_normalizer
 from gcs_utils import get_gcs_storage_options, upload_gcs_dir, check_gcs_dependencies
@@ -79,8 +79,9 @@ hidden_channels = cfg['hidden_channels']
 n_modes         = cfg['n_modes']
 nevents_in      = cfg.get('nevents_in', 10)
 log_directly    = cfg.get('log_directly', True)
-checkpoint_freq = cfg.get('checkpoint_freq', None)
-train_ratio     = cfg.get('train_ratio', 0.8)
+checkpoint_freq  = cfg.get('checkpoint_freq', None)
+min_save_epoch   = cfg.get('min_save_epoch', None)
+train_ratio      = cfg.get('train_ratio', 0.8)
 xyslice         = _slice(cfg.get('xyslice', [None, -1]))
 tauslice        = _slice(cfg.get('tauslice', [None, -1]))
 lr               = cfg['lr']
@@ -129,6 +130,7 @@ log(f'n_epochs:        {n_epochs}')
 log(f'batch_size:      {batch_size}')
 log(f'hidden_channels: {hidden_channels}')
 log(f'checkpoint_freq: {checkpoint_freq}')
+log(f'min_save_epoch:  {min_save_epoch}')
 log(f'n_modes:         {n_modes}')
 log(f'train_ratio:     {train_ratio}')
 log(f'xyslice:         {xyslice}')
@@ -267,6 +269,9 @@ patch_trainer_logging(trainer, log, history=history)
 
 if checkpoint_freq is not None and checkpoint_freq > 0:
     patch_trainer_checkpoint(trainer, Trainer, checkpoint_freq, model_dir, optimizer=optimizer)
+
+if min_save_epoch is not None and min_save_epoch > 0:
+    patch_trainer_min_save_epoch(trainer, Trainer, min_save_epoch)
 
 save_best_key = f'{test_resolutions[0]}_l2'
 
