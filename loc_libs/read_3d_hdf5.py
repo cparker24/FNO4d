@@ -183,65 +183,271 @@ def convert_root_to_hdf5(root_file_path, hdf5_file_path,
 
 # ---------------------------------------------------------------------------
 
-def read_3d_data_hdf5(hdf5_file_path, nevents=-1, start_event=0, verbose=False):
-    '''Load data from a pre-converted HDF5 file with true partial reads.
+class MultiH5Array:
+    '''Lazy concatenated view over the "arr" dataset across multiple HDF5 files.
 
-    Unlike read_3d_data() on a ROOT file, this never loads more than the
-    requested events because HDF5 chunked storage supports real random-access
-    I/O — only the requested HDF5 chunks are decompressed.
+    No data is read from disk until the object is indexed.  Supports the
+    numpy array protocol (shape, dtype, __len__, __getitem__, __array__) so
+    it can be used as a drop-in wherever a numpy array is expected, while
+    keeping memory usage bounded to exactly the slice that is requested.
+
+    Usage
+    -----
+        mha = MultiH5Array([f1, f2, f3])
+        batch = mha[0:32]       # reads only 32 events; returns ndarray
+        full  = mha.load()      # materialises everything
+        arr   = np.asarray(mha) # same as load()
 
     Parameters
     ----------
-    hdf5_file_path : str – path to .h5 file produced by convert_root_to_hdf5()
-    nevents        : int – number of events to load (-1 = all)
-    start_event    : int – first event index to load
+    file_paths   : list[str] – ordered list of .h5 files
+    global_start : int       – first global event index exposed (default 0)
+    global_stop  : int|None  – one-past-last global event index (None = all)
+    '''
+
+    # grid-parameter attrs that must agree across files
+    _DIM_KEYS = ('nFeatures', 'nx', 'ny', 'neta', 'choose_ntau')
+
+    def __init__(self, file_paths, global_start=0, global_stop=None):
+        try:
+            import h5py as _h5py
+        except ImportError:
+            raise ImportError("h5py is required: pip install h5py")
+        self._h5py = _h5py
+        self._paths = list(file_paths)
+
+        # read shape / dtype from first file; validate rest
+        with _h5py.File(self._paths[0], 'r') as f:
+            self._dtype      = f['arr'].dtype
+            self._item_shape = f['arr'].shape[1:]  # (nFeatures, nx, ny, neta, ntau)
+            ref_dims = {k: f.attrs[k] for k in self._DIM_KEYS if k in f.attrs}
+
+        lengths = []
+        for p in self._paths:
+            with _h5py.File(p, 'r') as f:
+                # dimension check
+                for k, ref in ref_dims.items():
+                    if k in f.attrs and f.attrs[k] != ref:
+                        raise ValueError(
+                            f"Dimension mismatch for '{k}': "
+                            f"{self._paths[0]} has {ref}, {p} has {f.attrs[k]}"
+                        )
+                lengths.append(f['arr'].shape[0])
+
+        self._cumlen   = np.concatenate([[0], np.cumsum(lengths)]).astype(np.int64)
+        self._raw_total = int(self._cumlen[-1])
+        self._offset   = int(global_start)
+        stop           = int(global_stop) if global_stop is not None else self._raw_total
+        self._length   = max(0, stop - self._offset)
+
+    # ------------------------------------------------------------------ numpy protocol
+
+    @property
+    def shape(self):
+        return (self._length,) + self._item_shape
+
+    @property
+    def dtype(self):
+        return self._dtype
+
+    def __len__(self):
+        return self._length
+
+    def __repr__(self):
+        return (f"MultiH5Array(files={len(self._paths)}, "
+                f"shape={self.shape}, dtype={self.dtype})")
+
+    def __array__(self, dtype=None, copy=None):  # noqa: ARG002
+        out = self._read_global(self._offset, self._offset + self._length)
+        return out if dtype is None else out.astype(dtype, copy=False)
+
+    # ------------------------------------------------------------------ public helpers
+
+    def load(self):
+        '''Materialise the entire view into one contiguous ndarray.'''
+        return self._read_global(self._offset, self._offset + self._length)
+
+    # ------------------------------------------------------------------ indexing
+
+    def __getitem__(self, idx):
+        if isinstance(idx, (int, np.integer)):
+            if idx < 0:
+                idx += self._length
+            if not (0 <= idx < self._length):
+                raise IndexError(f"index {idx} out of bounds for axis 0 with size {self._length}")
+            g  = self._offset + int(idx)
+            fi = self._file_for_global(g)
+            li = g - int(self._cumlen[fi])
+            with self._h5py.File(self._paths[fi], 'r') as f:
+                return f['arr'][li]
+
+        elif isinstance(idx, slice):
+            start, stop, step = idx.indices(self._length)
+            if step != 1:
+                # non-unit stride: materialise then fancy-index
+                return self.load()[idx]
+            return self._read_global(self._offset + start, self._offset + stop)
+
+        else:
+            # boolean mask, integer array, tuple of indices, …
+            return self.load()[idx]
+
+    # ------------------------------------------------------------------ internals
+
+    def _file_for_global(self, gi):
+        '''Return file index for global event index gi.'''
+        fi = int(np.searchsorted(self._cumlen[1:], gi, side='right'))
+        return min(fi, len(self._paths) - 1)
+
+    def _read_global(self, g_start, g_stop):
+        '''Read global event range [g_start, g_stop) from the file set.'''
+        if g_start >= g_stop:
+            return np.empty((0,) + self._item_shape, dtype=self._dtype)
+        pieces = []
+        for fi in range(len(self._paths)):
+            fstart = int(self._cumlen[fi])
+            fstop  = int(self._cumlen[fi + 1])
+            lo = max(g_start, fstart) - fstart
+            hi = min(g_stop,  fstop)  - fstart
+            if lo >= hi:
+                continue
+            with self._h5py.File(self._paths[fi], 'r') as f:
+                pieces.append(f['arr'][lo:hi])
+        if not pieces:
+            return np.empty((0,) + self._item_shape, dtype=self._dtype)
+        return np.concatenate(pieces, axis=0) if len(pieces) > 1 else pieces[0].copy()
+
+
+# ---------------------------------------------------------------------------
+
+def read_3d_data_hdf5(hdf5_file_path, nevents=-1, start_event=0,
+                      verbose=False, lazy=True):
+    '''Load data from one or more pre-converted HDF5 files.
+
+    When a list of files is supplied every file is treated as a contiguous
+    segment of one logical dataset — analogous to uproot.concatenate().
+    All files must have identical grid dimensions (nFeatures, nx, ny, neta,
+    choose_ntau); a ValueError is raised if they differ.
+
+    Parameters
+    ----------
+    hdf5_file_path : str or list[str]
+        Path(s) to .h5 file(s) produced by convert_root_to_hdf5().
+    nevents        : int  – events to load (-1 = all across all files).
+    start_event    : int  – first global event index.
+    lazy           : bool – True  → dat['arr'] is a MultiH5Array; data is read
+                                    from disk only when the object is sliced.
+                                    Ideal for training loops (one batch at a time).
+                            False → dat['arr'] is a numpy ndarray loaded immediately.
+    verbose        : bool – print memory diagnostics.
 
     Returns
     -------
     dict with the same keys as read_3d_data() in read_3d_root.py:
-        'arr'             – ndarray (nevents, nFeatures, nx, ny, neta, ntau)
-        'ntau_freezeout'  – 1D array of per-event freeze-out tau indices
-        'tau_freezeout'   – 1D array of per-event freeze-out tau values
-        plus all scalar grid parameters as individual keys
+        'arr'             – MultiH5Array (lazy=True) or ndarray (lazy=False)
+                            shape (n_events, nFeatures, nx, ny, neta, ntau)
+        'ntau_freezeout'  – 1D ndarray (always loaded eagerly; small)
+        'tau_freezeout'   – 1D ndarray (always loaded eagerly; small)
+        plus scalar grid parameters as individual keys (from first file attrs)
     '''
     try:
         import h5py
     except ImportError:
         raise ImportError("h5py is required: pip install h5py")
 
-    if not os.path.exists(hdf5_file_path):
-        raise FileNotFoundError(f"File {hdf5_file_path} does not exist.")
+    # ---- normalise input to a list ----------------------------------------
+    if isinstance(hdf5_file_path, (str, os.PathLike)):
+        file_paths = [str(hdf5_file_path)]
+    else:
+        file_paths = [str(p) for p in hdf5_file_path]
 
-    with h5py.File(hdf5_file_path, 'r') as hf:
-        total = int(hf.attrs['nevents'])
-        end_event = total if nevents <= 0 else min(start_event + nevents, total)
+    for p in file_paths:
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"File not found: {p}")
 
-        dat = {k: hf.attrs[k] for k in hf.attrs}
+    multi = len(file_paths) > 1
 
-        # True partial read: HDF5 only decompresses the chunks that overlap
-        # [start_event, end_event) — no full-file load.
+    # ---- read attrs from each file; validate dimensions -------------------
+    _DIM_KEYS = ('nFeatures', 'nx', 'ny', 'neta', 'choose_ntau')
+    all_attrs  = []
+    per_file_nevents = []
+    for p in file_paths:
+        with h5py.File(p, 'r') as hf:
+            all_attrs.append(dict(hf.attrs))
+            per_file_nevents.append(int(hf.attrs['nevents']))
+
+    if multi:
+        ref = all_attrs[0]
+        for attrs, p in zip(all_attrs[1:], file_paths[1:]):
+            for k in _DIM_KEYS:
+                if k in ref and k in attrs and attrs[k] != ref[k]:
+                    raise ValueError(
+                        f"Dimension mismatch for '{k}': "
+                        f"{file_paths[0]} has {ref[k]}, {p} has {attrs[k]}"
+                    )
+        print(f"Multi-file mode: {len(file_paths)} files, "
+              f"total events = {sum(per_file_nevents)}")
+
+    # merged attrs: scalar grid params from first file
+    dat = dict(all_attrs[0])
+
+    # ---- compute global event range ---------------------------------------
+    total_events = sum(per_file_nevents)
+    end_event    = total_events if nevents <= 0 else min(start_event + nevents, total_events)
+    n_loaded     = end_event - start_event
+
+    # ---- ntau_freezeout / tau_freezeout: always load eagerly (1D, small) --
+    ntau_pieces = []
+    tau_pieces  = []
+    # iterate files, tracking cumulative offset to clip to [start_event, end_event)
+    cum = 0
+    for p, nev in zip(file_paths, per_file_nevents):
+        fstart, fstop = cum, cum + nev
+        lo = max(start_event, fstart) - fstart
+        hi = min(end_event,   fstop)  - fstart
+        if lo < hi:
+            with h5py.File(p, 'r') as hf:
+                ntau_pieces.append(hf['ntau_freezeout'][lo:hi])
+                tau_pieces.append(hf['tau_freezeout'][lo:hi])
+        cum = fstop
+
+    dat['ntau_freezeout'] = (np.concatenate(ntau_pieces) if len(ntau_pieces) > 1
+                             else ntau_pieces[0])
+    dat['tau_freezeout']  = (np.concatenate(tau_pieces)  if len(tau_pieces) > 1
+                             else tau_pieces[0])
+
+    # ---- arr: lazy or eager -----------------------------------------------
+    if lazy:
+        dat['arr'] = MultiH5Array(file_paths,
+                                  global_start=start_event,
+                                  global_stop=end_event)
+        label = f"({file_paths[0]}{'…' if multi else ''})"
+        print(f"Lazy MultiH5Array: {n_loaded} events {label}; "
+              f"arr shape: {dat['arr'].shape}")
+        dat['nans'] = None  # NaN scan would force full load; skip in lazy mode
+    else:
         if verbose:
-            # Reset peak so the reported peak reflects THIS read only, not any
-            # prior operations (e.g. a ROOT→HDF5 conversion earlier in the run).
             tracemalloc.reset_peak()
             current, peak = tracemalloc.get_traced_memory()
-            print(f"[Memory] before HDF5 read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
+            print(f"[Memory] before HDF5 read  current={current/1024**3:.2f} GiB  "
+                  f"peak={peak/1024**3:.2f} GiB")
 
-        dat['arr']            = hf['arr'][start_event:end_event]
-        dat['ntau_freezeout'] = hf['ntau_freezeout'][start_event:end_event]
-        dat['tau_freezeout']  = hf['tau_freezeout'][start_event:end_event]
+        mha = MultiH5Array(file_paths, global_start=start_event, global_stop=end_event)
+        dat['arr'] = mha.load()
+        del mha
 
         if verbose:
             current, peak = tracemalloc.get_traced_memory()
-            print(f"[Memory] after  HDF5 read  current={current/1024**3:.2f} GiB  peak={peak/1024**3:.2f} GiB")
+            print(f"[Memory] after  HDF5 read  current={current/1024**3:.2f} GiB  "
+                  f"peak={peak/1024**3:.2f} GiB")
 
-    n_loaded = end_event - start_event
-    print(f"Loaded {n_loaded} events from {hdf5_file_path}; arr shape: {dat['arr'].shape}")
+        label = (f"{file_paths[0]}{'…' if multi else ''}")
+        print(f"Loaded {n_loaded} events from {label}; arr shape: {dat['arr'].shape}")
 
-    num_nan = int(np.sum(np.isnan(dat['arr'])))
-    if num_nan:
-        print(f"Warning: {num_nan} NaN entries in loaded array")
-    dat['nans'] = np.argwhere(np.isnan(dat['arr'])) if num_nan else None
+        num_nan = int(np.sum(np.isnan(dat['arr'])))
+        if num_nan:
+            print(f"Warning: {num_nan} NaN entries in loaded array")
+        dat['nans'] = np.argwhere(np.isnan(dat['arr'])) if num_nan else None
 
     return dat
 

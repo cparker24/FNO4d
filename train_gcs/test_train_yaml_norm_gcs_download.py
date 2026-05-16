@@ -175,20 +175,19 @@ for gs_uri, local_path in zip(input_files, local_files):
 # ---------------------------------------------------------------------------
 log(f'Events called for {nevents_in}')
 
-arr_data = [read_3d_data(f, nevents=nevents_in, local_rank=None) for f in local_files]
-
-if len(arr_data) == 0:
+if not local_files:
     raise ValueError("No data found in the specified input files.")
+arr_data = read_3d_data(local_files, nevents=nevents_in, local_rank=None)
 
 log('Data parameters from input file:')
-for key in arr_data[0].keys():
+for key in arr_data.keys():
     if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
-        log(f'  {key}: {arr_data[0][key]}')
+        log(f'  {key}: {arr_data[key]}')
 
-arr = arr_data[0]['arr']
+arr = arr_data['arr']
 arr = arr[:, :, xyslice, xyslice, tauslice, :]
 
-grid_params = {k: arr_data[0][k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
+grid_params = {k: arr_data[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
 del arr_data
 gc.collect()
 

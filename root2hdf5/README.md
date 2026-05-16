@@ -6,27 +6,26 @@ files suitable for machine learning pipelines.
 
 ---
 
-## Which example to use
+## Which script to use
 
-Two scripts are provided; they produce HDF5 files in the **same format**
-so `read_3d_data_hdf5()` works on the output of either:
+| Script | Purpose | When to use |
+|--------|---------|-------------|
+| [`inspect_file.py`](inspect_file.py) | Inspect any `.root` or `.h5` file | Before converting: check grid params, ntau range, padding overhead. After merging: verify provenance. |
+| [`root_to_hdf5.py`](root_to_hdf5.py) | **Primary CLI converter** | Day-to-day use: single file, directory, multi-file merge, or globally-consistent padding across files. Auto-detects ROOT format. |
+| [`convert_example.py`](convert_example.py) | Standalone walkthrough | Learning the mechanics; batch nodes without the full ML stack (`uproot`, `awkward`, `h5py`, `numpy` only). |
+| [`convert_example_production.py`](convert_example_production.py) | loc_libs API demo | Exploring the full `convert_root_to_hdf5` / `read_3d_data_hdf5` API, remote S3/GCS patterns, PyTorch DataLoader integration. |
 
-| | [`convert_example.py`](convert_example.py) | [`convert_example_production.py`](convert_example_production.py) |
-|---|---|---|
-| **Dependencies** | `uproot`, `awkward`, `h5py`, `numpy` only | Full FNO4d install (`loc_libs`) |
-| **FNO4d required** | No | Yes |
-| **Use on non-GPU batch machine** | Yes — lightweight, easy to `pip install` | Needs PyTorch / MLX stack |
-| **ROOT format** | Synthetic / custom (adapt as needed) | MUSIC output format (TParameter scalars, `t/user_res` branch) |
-| **Remote files (S3/GCS)** | No | Yes |
-| **int32-safe large-file batching** | No | Yes |
-| **Memory tracing** | Basic (tracemalloc peak per step) | Full (tracemalloc snapshots before/after every batch) |
-| **When to reach for it** | Quick one-off conversions; batch nodes without the full ML stack; learning the mechanics | Routine use in the FNO4d project with real MUSIC data |
+The two example scripts and `root_to_hdf5.py` all produce HDF5 files in the
+**same schema**, so `read_3d_data_hdf5()` and the PyTorch `Dataset` below
+work on the output of any of them.
 
 **Recommended workflow:**
-- Convert once on a data-processing machine (CPU node, login node, etc.)
-  using `convert_example.py` or `loc_libs/read_3d_hdf5.py` — whichever is
-  easier to install there.
-- Train and evaluate on the GPU node reading from the HDF5 file.
+1. Run `inspect_file.py` on your ROOT file(s) to check the grid and ntau range.
+2. Convert with `root_to_hdf5.py` on a CPU/login node (one-time cost).
+   - Single collision system: `python root_to_hdf5.py data/run.root`
+   - Multiple systems, keep separate files: `python root_to_hdf5.py --global-ntau data/`
+   - Combine everything: `python root_to_hdf5.py --merge data/all.h5 data/`
+3. Train and evaluate on the GPU node reading from the HDF5 file.
 
 ---
 
@@ -276,6 +275,166 @@ python convert_example_production.py --h5 /path/to/dAu_250ev_mb.h5
 
 ---
 
+## Quick file inspection (`inspect_file.py`)
+
+Before converting or after merging, use `inspect_file.py` to verify
+the contents of any ROOT or HDF5 file.  The format is auto-detected
+from the file extension.
+
+```bash
+python inspect_file.py data/run01.root
+python inspect_file.py data/merged.h5
+python inspect_file.py data/run01.root data/merged.h5   # multiple files
+```
+
+**ROOT output** includes: format detected (standalone / production),
+all grid parameters, event count, ntau min/max/mean, whether the τ
+dimension is fixed or jagged, recommended `choose_ntau` for conversion,
+and estimated uncompressed sizes with padding overhead.
+
+**HDF5 output** includes: all metadata attributes, array shape/dtype/chunk
+layout, uncompressed size, ntau distribution vs `choose_ntau` (exact /
+zero-padded / clipped counts), and merge provenance (`source_files`) if
+the file was produced by `--merge`.
+
+Sample ROOT output:
+
+```
+============================================================
+  data/dAu_25ev_mb.root
+============================================================
+  Type        : ROOT
+  Size        : 968.7 MiB
+  Format      : production
+
+  Grid / metadata:
+    nx                   65
+    ny                   65
+    neta                 33
+    nFeatures            4
+    dtau                 0.1
+    tau_min              0.58
+    ...
+
+  Events      : 25
+  τ dimension : VARIABLE (jagged)
+    ntau min / max / mean : 15 / 36 / 27.5
+    → choose_ntau for HDF5 conversion: 36  (max)
+
+  Array size estimates (float32):
+    HDF5 output shape   : (25, 4, 65, 65, 33, 36)
+    Uncompressed padded : 1.87 GiB
+    Raw data (no pad)   : 1.43 GiB
+    Padding overhead    : 23.6%
+```
+
+---
+
+## Batch conversion CLI (`root_to_hdf5.py`)
+
+`root_to_hdf5.py` is a command-line tool that wraps both converters and
+adds multi-file merge support.  Use it in place of calling the converter
+APIs directly whenever you need to process more than one file.
+
+### Per-file conversion (default)
+
+Each ROOT file is converted to an HDF5 file in the same directory.
+Files whose `.h5` already exists are skipped unless `--force` is given.
+The backend is auto-detected by inspecting the ROOT layout.
+
+```bash
+# one file — backend selected automatically
+python root_to_hdf5.py data/run01.root
+
+# all ROOT files in a directory
+python root_to_hdf5.py data/
+
+# recursively, force overwrite
+python root_to_hdf5.py --force --recursive data/
+
+# explicit list of files
+python root_to_hdf5.py a.root b.root c.root
+
+# dry-run: print what would happen, write nothing
+python root_to_hdf5.py --dry-run data/
+```
+
+### Consistent padding across files (`--global-ntau`)
+
+When converting multiple ROOT files individually, each file normally pads
+to its own per-file maximum τ.  This means different HDF5 files may have
+different `choose_ntau` values and incompatible array shapes.
+
+`--global-ntau` adds a lightweight first pass that reads only the `ntau`
+arrays from every input file, finds the global maximum, and uses that as
+`choose_ntau` for every individual conversion.  All output HDF5 files then
+share the same τ dimension and can be fed into the same DataLoader without
+further alignment.
+
+```bash
+# convert each file separately, all padded to the global max ntau
+python root_to_hdf5.py --global-ntau data/
+
+# with explicit list
+python root_to_hdf5.py --global-ntau run_a.root run_b.root run_c.root
+
+# dry-run to see the detected global ntau before writing
+python root_to_hdf5.py --global-ntau --dry-run data/
+```
+
+`--global-ntau` is ignored if `--choose-ntau N` is already set (the explicit
+value takes precedence).
+
+### Merge mode (`--merge OUTPUT.h5`)
+
+All input ROOT files are combined into a single HDF5 file.  Events are
+padded to the **global maximum τ length** across every input file (or the
+value given by `--choose-ntau`).
+
+```bash
+# merge an entire directory into one file
+python root_to_hdf5.py --merge data/merged.h5 data/
+
+# merge an explicit list
+python root_to_hdf5.py --merge out/merged.h5 a.root b.root c.root
+
+# dry-run to check the output shape before writing
+python root_to_hdf5.py --dry-run --merge out/merged.h5 data/
+
+# cap to first 100 events total across all files
+python root_to_hdf5.py --merge out/merged.h5 --nevents 100 data/
+```
+
+Merge reads metadata from every file in a first pass (lightweight — only
+`ntau_freezeout` and grid parameters), then streams events through a single
+`uproot.iterate` call across all chained files in a second pass.  Peak
+memory is bounded by the iterate step size, not the total dataset size.
+
+A merged HDF5 carries two extra provenance items not present in
+single-file output:
+
+| Item | Type | Content |
+|------|------|---------|
+| `attrs["source_files"]` | string list attribute | absolute paths of every input ROOT file |
+| `source_file` dataset | `int32 (nevents,)` | per-event index into `source_files` |
+
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--merge OUTPUT.h5` | — | merge all inputs into one HDF5 |
+| `--global-ntau` | off | scan all files first for the global max ntau; use it as `choose_ntau` for every individual conversion so all HDF5 files share the same τ dimension |
+| `--mode {auto,standalone,production}` | `auto` | converter backend; auto-detects from ROOT layout |
+| `--force` | off | overwrite existing HDF5 file(s) |
+| `--dry-run` | off | print plan without writing |
+| `--recursive` / `-r` | off | search directories recursively |
+| `--nevents N` | `-1` (all) | max events per file (per-file) or total (merge) |
+| `--choose-ntau N` | auto | fix τ length explicitly; overrides `--global-ntau` |
+| `--chunk-events N` | `1` | HDF5 chunk size in events |
+| `--verbose` | off | print memory snapshots (production single-file only) |
+
+---
+
 ## Using the HDF5 file in a PyTorch training loop
 
 Both converters write the same HDF5 schema, so this Dataset works
@@ -385,14 +544,25 @@ Both converters write files with this schema so they are interchangeable:
     tau_freezeout     float32  (nevents,)  per-event freeze-out proper time (fm/c)
 ```
 
+Merged files (produced by `root_to_hdf5.py --merge`) add:
+
+```
+  attrs:
+    source_files      list of str  absolute paths of every input ROOT file
+  datasets:
+    source_file       int32  (nevents,)  index into attrs["source_files"] per event
+```
+
 ---
 
 ## Files
 
 | File                              | Description |
 |-----------------------------------|-------------|
-| `convert_example.py`              | Standalone: synthetic ROOT, conversion, readback, verification. Minimal dependencies — suitable for non-GPU batch machines. |
-| `convert_example_production.py`   | loc_libs API: full `convert_root_to_hdf5` / `read_3d_data_hdf5` usage, remote files, PyTorch DataLoader. Requires FNO4d install. |
+| `inspect_file.py`                 | **Quick inspector.** Pass any `.root` or `.h5` file to print grid metadata, array shape, ntau distribution, padding overhead, and merge provenance. |
+| `root_to_hdf5.py`                 | **CLI batch converter and merger.** Converts one file, a list, or a whole directory; `--merge` combines multiple ROOT files into one HDF5. Auto-detects ROOT format. Start here for day-to-day use. |
+| `convert_example.py`              | Standalone walkthrough: synthetic ROOT creation, conversion, readback, round-trip verification. Minimal dependencies — suitable for non-GPU batch machines. |
+| `convert_example_production.py`   | loc_libs API demo: full `convert_root_to_hdf5` / `read_3d_data_hdf5` usage, remote S3/GCS files, PyTorch DataLoader. Requires FNO4d install. |
 | `README.md`                       | This document |
 
 Production converter (MUSIC ROOT format, remote files, large-file batching):
