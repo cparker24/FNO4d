@@ -53,7 +53,7 @@ def _(mo):
 @app.cell
 def _(cfg_path_ui, eval_file_ui, nevents_ui):
     import sys, gc, os
-    sys.path.append('../loc_libs')
+    sys.path.insert(0, '../loc_libs')
 
     import yaml
     import numpy as np

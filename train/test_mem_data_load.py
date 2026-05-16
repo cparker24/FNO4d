@@ -122,7 +122,7 @@ import gc
 from  torch.utils.data import DataLoader, random_split, Dataset
 
 import sys
-sys.path.append('../loc_libs')
+sys.path.insert(0, '../loc_libs')
 from read_3d_root import read_3d_data, coarsen_array
 from parse_training_log import plot_training_log
 

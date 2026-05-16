@@ -25,7 +25,7 @@ def _():
     import sys 
     import torch 
 
-    sys.path.append('../../loc_libs')
+    sys.path.insert(0, '../../loc_libs')
     #import contour_v_plot
     import read_3d_root
     from os import path
@@ -223,7 +223,7 @@ def _(plt, pred):
 
 @app.cell
 def _(pred, sys):
-    sys.path.append('../../loc_libs')
+    sys.path.insert(0, '../../loc_libs')
     from skinnycontour import plot_three_bins_contour, plot_contour
 
     #print(np.all(np.abs(pred['y'][0,0,:,:,0,35])<0.0001))
