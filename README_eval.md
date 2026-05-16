@@ -425,7 +425,7 @@ command line. For scripted evaluation, call the underlying logic directly:
 ```python
 #!/usr/bin/env python
 import sys
-sys.path.append('../loc_libs')
+sys.path.insert(0, '../loc_libs')
 
 import yaml, numpy as np, torch
 from pathlib import Path

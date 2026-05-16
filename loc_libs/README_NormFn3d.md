@@ -191,7 +191,7 @@ the spatial pattern at each fixed time step).
 
 ```python
 import sys
-sys.path.append('loc_libs')          # adjust path as needed
+sys.path.insert(0, 'loc_libs')       # adjust path as needed
 from NormFn3d import NormFn3d
 import numpy as np
 ```

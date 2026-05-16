@@ -238,7 +238,7 @@ reducing these lowers memory at the cost of representational capacity.
 
 ---
 
-## Datasets (`loc_libs/datasets.py`)
+## Datasets (`loc_libs/fluid_datasets.py`)
 
 Both dataset classes share the same indexing logic via `_FluidDatasetBase`:
 the first τ-slice is repeated as input, and τ-steps 1…T−1 are the target.
@@ -509,8 +509,8 @@ Outputs are split between `odir` (logs and metrics) and `model_dir` (weights).
 | module | symbol | purpose |
 |--------|--------|---------|
 | `read_3d_root` | `read_3d_data` | load ROOT → numpy array (`verbose=False`) |
-| `datasets` | `FluidDataset` | PyTorch Dataset wrapping the 6-D array |
-| `datasets` | `FluidDatasetMLX` | MLX Dataset — returns numpy float32 |
+| `fluid_datasets` | `FluidDataset` | PyTorch Dataset wrapping the 6-D array |
+| `fluid_datasets` | `FluidDatasetMLX` | MLX Dataset — returns numpy float32 |
 | `memory_utils` | `calculate_model_memory` | parameter count and MB footprint |
 | `memory_utils` | `MemoryPrinter` | callable RSS printer for ad-hoc profiling |
 | `memory_utils` | `reset_peak_memory` | reset CPU/GPU peak counters before training |

@@ -94,7 +94,7 @@ FNO4d/
 │   ├── read_3d_root.py          # read events from ROOT files (local or cloud)
 │   ├── read_3d_hdf5.py          # ROOT → HDF5 conversion + streaming reads
 │   ├── root_pytorch_loader.py   # IterableDataset for large ROOT files
-│   ├── datasets.py              # in-memory PyTorch Dataset classes
+│   ├── fluid_datasets.py        # in-memory PyTorch Dataset classes
 │   ├── training_utils.py        # RunLog and shared training helpers
 │   ├── parse_training_log.py    # parse and plot training-loss logs
 │   ├── memory_utils.py          # memory profiling utilities
@@ -647,7 +647,7 @@ quantitative check.
 
 ```python
 import sys, numpy as np
-sys.path.append('loc_libs')
+sys.path.insert(0, 'loc_libs')
 from model_eval import ModelEval
 
 # pred, true: (N, C, nx, ny, neta, T)  — physical units, initial condition excluded

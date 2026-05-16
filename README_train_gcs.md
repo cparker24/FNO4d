@@ -228,7 +228,7 @@ re-running the call after adding new checkpoints only transfers the new files.
 
 ```python
 import sys
-sys.path.append('loc_libs')
+sys.path.insert(0, 'loc_libs')
 from gcs_utils import upload_gcs_dir
 
 # push everything in model_dir to GCS
@@ -358,7 +358,7 @@ same size-based skip logic, opposite direction.
 
 ```python
 import sys
-sys.path.append('loc_libs')
+sys.path.insert(0, 'loc_libs')
 from gcs_utils import download_gcs_dir
 
 # download everything
@@ -431,7 +431,7 @@ interactive use.
 
 ```python
 import sys
-sys.path.append('loc_libs')
+sys.path.insert(0, 'loc_libs')
 from gcs_utils import (
     get_gcs_storage_options,
     download_gcs_files, download_gcs_prefix,

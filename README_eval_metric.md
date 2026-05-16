@@ -99,7 +99,7 @@ eccentricity information that drives anisotropic flow.
 
 ```python
 import sys, numpy as np
-sys.path.append('../loc_libs')
+sys.path.insert(0, '../loc_libs')
 from model_eval import ModelEval
 
 # pred, true: arrays (N, C, nx, ny, neta, T) in physical units
@@ -856,7 +856,7 @@ the full array including the initial condition, shape `(N, C, nx, ny, neta, T+1)
 
 ```python
 import sys, numpy as np, torch
-sys.path.append('../loc_libs')
+sys.path.insert(0, '../loc_libs')
 from model_eval import ModelEval
 
 device = torch.device('cpu')
