@@ -44,6 +44,9 @@ python root_to_hdf5.py --merge out/merged.h5 a.root b.root c.root
 # dry-run: show what would happen without doing anything
 python root_to_hdf5.py --dry-run --merge out/merged.h5 data/
 
+# convert files individually but pad all to the same global max ntau
+python root_to_hdf5.py --global-ntau data/
+
 # custom tau steps and chunk size
 python root_to_hdf5.py --choose-ntau 20 --chunk-events 4 data/run01.root
 """
@@ -374,11 +377,25 @@ def run(args):
             return 1
         return 0
 
+    # ── Per-file conversion with global ntau sync ────────────────────────
+    if args.global_ntau and args.choose_ntau is None:
+        print(f"Pass 1: scanning {len(root_files)} file(s) for global max ntau ...")
+        all_ntau = []
+        for i, rp in enumerate(root_files, 1):
+            mode = args.mode if args.mode != "auto" else _detect_mode(rp)
+            _, ntau_arr, _ = _read_file_meta(rp, mode)
+            all_ntau.append(ntau_arr)
+            print(f"  [{i}/{len(root_files)}] {os.path.basename(rp)}"
+                  f"  ntau=[{ntau_arr.min()}, {ntau_arr.max()}]")
+        args.choose_ntau = int(np.concatenate(all_ntau).max())
+        print(f"Global choose_ntau = {args.choose_ntau}\n")
+
     # ── Per-file conversion mode ─────────────────────────────────────────
     print(f"Found {len(root_files)} ROOT file(s) to process.")
-    print(f"Backend : {args.mode}")
-    print(f"Force   : {args.force}")
-    print(f"Dry-run : {args.dry_run}")
+    print(f"Backend    : {args.mode}")
+    print(f"choose_ntau: {args.choose_ntau or 'auto (per-file max)'}")
+    print(f"Force      : {args.force}")
+    print(f"Dry-run    : {args.dry_run}")
     print()
 
     n_converted = n_skipped = n_failed = 0
@@ -440,6 +457,13 @@ def parse_args():
     p.add_argument(
         "--merge", metavar="OUTPUT.h5", default=None,
         help="merge all input ROOT files into one HDF5 at OUTPUT.h5",
+    )
+    p.add_argument(
+        "--global-ntau", action="store_true",
+        help="scan all input files first to find the global max ntau, then use "
+             "that as choose_ntau for every individual conversion — ensures all "
+             "output HDF5 files share the same tau padding (ignored if "
+             "--choose-ntau is set explicitly)",
     )
     p.add_argument(
         "--mode", choices=["auto", "standalone", "production"], default="auto",
