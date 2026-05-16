@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# Comparison config for mlx_vs_torch_inf_test.py
+# ---------------------------------------------------------------------------
+
+# --- weight / checkpoint ---
+# Directory that holds best_model_state_dict.pt AND the training config.yaml
+# (paths relative to this file's directory, or absolute)
+compare_dir: ./best_model_compare
+
+# Filename of the PyTorch state-dict inside compare_dir
+checkpoint_file: best_model_state_dict.pt
+
+# --- training config (model architecture + data-prep parameters) ---
+# Path to the training config.yaml whose hidden_channels, n_modes, xyslice,
+# tauslice, train_ratio, input_dir, input_files, and normalization are used.
+# Relative to this file's directory, or absolute.
+train_config: ./best_model_compare/config.yaml
+
+# --- normalizer ---
+# Path to normalizer.npz produced during training.
+# Set to null to skip inverse normalisation (raw model outputs are compared).
+# Relative to this file's directory, or absolute.
+normalizer: ./best_model_compare/normalizer.npz
+
+# --- output ---
+# Directory where figures and comparison_summary.json are written.
+output_dir: ./mlx_torch_compare_output
+
+# --- plot settings ---
+# η bin index to use for all x/y energy figures
+ieta_plot: 16
+
+# τ output indices (0-based) to include in the comparison figures
+t_bins_plot: [1, 5, 10, 30]
+
+# Channel to show in the energy figures
+# 0 = ε (energy density)  1 = vx  2 = vy  3 = vη
+channel: 0
+
+# Event index (within the test split) used for per-event 2D figures
+event_index: 0
