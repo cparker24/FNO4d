@@ -241,17 +241,28 @@ def _(mo, model_dir, ckpt_type_ui, ckpt_epoch_ui,
         _is_pt = ckpt_type.startswith('pytorch_')
 
         if ckpt_type == 'best':
-            ckpt_path = model_dir / 'best_model.safetensors'
+            ckpt_path    = model_dir / 'best_model.safetensors'
+            _pt_fallback = model_dir / 'best_model_state_dict.pt'
         elif ckpt_type == 'last':
-            ckpt_path = model_dir / 'last_model.safetensors'
+            ckpt_path    = model_dir / 'last_model.safetensors'
+            _pt_fallback = model_dir / 'last_model.pt'
         elif ckpt_type == 'checkpoint_N':
-            ckpt_path = model_dir / f'checkpoint_{_epoch}' / 'best_model.safetensors'
+            ckpt_path    = model_dir / f'checkpoint_{_epoch}' / 'best_model.safetensors'
+            _pt_fallback = model_dir / f'checkpoint_{_epoch}' / 'best_model_state_dict.pt'
         elif ckpt_type == 'pytorch_best':
-            ckpt_path = model_dir / 'best_model_state_dict.pt'
+            ckpt_path    = model_dir / 'best_model_state_dict.pt'
+            _pt_fallback = None
         elif ckpt_type == 'pytorch_last':
-            ckpt_path = model_dir / 'last_model.pt'
+            ckpt_path    = model_dir / 'last_model.pt'
+            _pt_fallback = None
         else:  # pytorch_checkpoint_N
-            ckpt_path = model_dir / f'checkpoint_{_epoch}' / 'best_model_state_dict.pt'
+            ckpt_path    = model_dir / f'checkpoint_{_epoch}' / 'best_model_state_dict.pt'
+            _pt_fallback = None
+
+        if not _is_pt and not ckpt_path.exists() and _pt_fallback is not None and _pt_fallback.exists():
+            print(f'No safetensors at {ckpt_path.name} — auto-fallback to PyTorch weight transfer')
+            ckpt_path = _pt_fallback
+            _is_pt = True
 
         print(f'Checkpoint: {ckpt_path}  ({"PyTorch→MLX transfer" if _is_pt else "MLX native"})')
         mo.stop(
