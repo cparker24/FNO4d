@@ -576,6 +576,109 @@ def download_gcs_dir(gs_prefix: str, local_dir: str, key_file: str,
 
 
 # ---------------------------------------------------------------------------
+# listing helpers
+# ---------------------------------------------------------------------------
+
+def list_gcs_prefix(gs_prefix: str, key_file: str,
+                    recursive: bool = True) -> dict:
+    """List blobs (and subdirectory prefixes) under a GCS prefix.
+
+    Args:
+        gs_prefix:  GCS URI to list, e.g. ``gs://my-bucket/runs/run01/``.
+        key_file:   Path to a GCS service-account JSON key file.
+        recursive:  If True (default), return every blob under the prefix.
+                    If False, return only top-level items and report
+                    immediate subdirectory prefixes separately (analogous to
+                    ``gsutil ls`` without ``-r``).
+
+    Returns:
+        dict with keys:
+
+        ``blobs``
+            List of dicts, one per blob::
+
+                {
+                    "name":    str,       # full blob name inside the bucket
+                    "gs_uri":  str,       # gs://bucket/name
+                    "size":    int,       # bytes
+                    "updated": datetime,  # last-modified (UTC, tz-aware)
+                }
+
+        ``prefixes``
+            List of ``gs://`` URIs for immediate subdirectory prefixes.
+            Always empty when *recursive* is True.
+
+        ``bucket``
+            Bucket name (str).
+
+        ``prefix``
+            Normalised blob prefix that was listed (str, no trailing slash).
+
+    Raises:
+        ImportError: if google-cloud-storage is not installed.
+        FileNotFoundError: if *key_file* does not exist.
+        ValueError: if *gs_prefix* is not a ``gs://`` URI.
+    """
+    _require_gcs_storage()
+
+    from google.cloud import storage
+    from google.oauth2 import service_account
+
+    key_path = Path(key_file)
+    if not key_path.exists():
+        raise FileNotFoundError(f"GCS key file not found: {key_file}")
+
+    creds = service_account.Credentials.from_service_account_file(str(key_path))
+    client = storage.Client(credentials=creds, project=creds.project_id)
+
+    bucket_name, blob_prefix = parse_gcs_uri(gs_prefix)
+    blob_prefix = blob_prefix.rstrip("/")
+    # GCS prefix listing requires a trailing slash (unless listing bucket root)
+    list_prefix = (blob_prefix + "/") if blob_prefix else None
+
+    if recursive:
+        blobs = list(client.list_blobs(bucket_name, prefix=list_prefix))
+        blob_entries = [
+            {
+                "name":    b.name,
+                "gs_uri":  f"gs://{bucket_name}/{b.name}",
+                "size":    b.size,
+                "updated": b.updated,
+            }
+            for b in blobs if not b.name.endswith("/")
+        ]
+        return {
+            "blobs":    blob_entries,
+            "prefixes": [],
+            "bucket":   bucket_name,
+            "prefix":   blob_prefix,
+        }
+    else:
+        iterator = client.list_blobs(
+            bucket_name, prefix=list_prefix, delimiter="/"
+        )
+        blobs = list(iterator)   # must exhaust iterator before reading .prefixes
+        blob_entries = [
+            {
+                "name":    b.name,
+                "gs_uri":  f"gs://{bucket_name}/{b.name}",
+                "size":    b.size,
+                "updated": b.updated,
+            }
+            for b in blobs if not b.name.endswith("/")
+        ]
+        prefix_entries = [
+            f"gs://{bucket_name}/{p}" for p in sorted(iterator.prefixes)
+        ]
+        return {
+            "blobs":    blob_entries,
+            "prefixes": prefix_entries,
+            "bucket":   bucket_name,
+            "prefix":   blob_prefix,
+        }
+
+
+# ---------------------------------------------------------------------------
 # availability check (useful in scripts to give an early error)
 # ---------------------------------------------------------------------------
 

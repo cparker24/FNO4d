@@ -8,6 +8,7 @@ or the GCS_KEY_FILE environment variable.
 
 Sub-commands
 ------------
+ls            List objects under a GCS prefix with size and modification time.
 upload-file   Upload a single local file to a GCS URI.
 upload-dir    Upload a local directory tree to a GCS prefix.
 download-file Download a single GCS object to a local directory.
@@ -15,6 +16,12 @@ download-dir  Download a GCS prefix (directory) to a local directory.
 
 Examples
 --------
+# List top-level items (files + subdirectories)
+python gcs.py ls gs://my-bucket/runs/run01/ --key-file service_account.json
+
+# List all objects recursively
+python gcs.py ls gs://my-bucket/runs/run01/ -r --key-file service_account.json
+
 # Upload a single file
 python gcs.py upload-file model.pt gs://my-bucket/runs/run01/model.pt \\
     --key-file service_account.json
@@ -67,9 +74,72 @@ def _resolve_key_file(args) -> str:
     return key
 
 
+def _fmt_size(size_bytes: int) -> str:
+    for unit, factor in (("GiB", 1024**3), ("MiB", 1024**2), ("KiB", 1024)):
+        if size_bytes >= factor:
+            return f"{size_bytes / factor:7.1f} {unit}"
+    return f"{size_bytes:7d}   B"
+
+
+def _fmt_time(dt) -> str:
+    if dt is None:
+        return " " * 19
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
 # ---------------------------------------------------------------------------
 # sub-command handlers
 # ---------------------------------------------------------------------------
+
+def cmd_ls(args):
+    key = _resolve_key_file(args)
+    result = gcs_utils.list_gcs_prefix(
+        gs_prefix=args.gs_prefix,
+        key_file=key,
+        recursive=args.recursive,
+    )
+
+    blobs    = result["blobs"]
+    prefixes = result["prefixes"]
+    bucket   = result["bucket"]
+    prefix   = result["prefix"]
+
+    base = f"gs://{bucket}/{prefix}/" if prefix else f"gs://{bucket}/"
+    print(f"Listing: {base}{'  (recursive)' if args.recursive else ''}")
+
+    if not blobs and not prefixes:
+        print("  (empty)")
+        return
+
+    col_w = 12  # size column width
+    print(f"\n{'SIZE':>{col_w}}  {'MODIFIED':<19}  PATH")
+    print("-" * (col_w + 2 + 19 + 2 + 60))
+
+    # Subdirectory prefixes first (non-recursive only)
+    for p in prefixes:
+        # strip gs://bucket/ and the listed prefix to get the relative name
+        rel = p.removeprefix(f"gs://{bucket}/")
+        if prefix:
+            rel = rel.removeprefix(prefix).lstrip("/")
+        print(f"{'DIR':>{col_w}}  {' ' * 19}  {rel}")
+
+    # Blobs
+    for entry in sorted(blobs, key=lambda b: b["name"]):
+        rel = entry["name"]
+        if prefix:
+            rel = entry["name"].removeprefix(prefix).lstrip("/")
+        print(f"{_fmt_size(entry['size']):>{col_w}}  {_fmt_time(entry['updated'])}  {rel}")
+
+    # Summary line
+    total = sum(e["size"] for e in blobs)
+    n_dirs = len(prefixes)
+    print("-" * (col_w + 2 + 19 + 2 + 60))
+    parts = [f"{len(blobs)} file(s)"]
+    if n_dirs:
+        parts.append(f"{n_dirs} subdir(s)")
+    parts.append(f"total {_fmt_size(total).strip()}")
+    print("  ".join(parts))
+
 
 def cmd_upload_file(args):
     key = _resolve_key_file(args)
@@ -120,13 +190,22 @@ def cmd_download_dir(args):
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    parent = argparse.ArgumentParser(add_help=False)
-    parent.add_argument(
+    # Shared parent: key-file only (used by ls)
+    parent_key = argparse.ArgumentParser(add_help=False)
+    parent_key.add_argument(
         "--key-file", metavar="JSON",
         help="GCS service-account JSON key file "
              "(default: $GCS_KEY_FILE environment variable).",
     )
-    parent.add_argument(
+
+    # Shared parent: key-file + overwrite (used by transfer commands)
+    parent_transfer = argparse.ArgumentParser(add_help=False)
+    parent_transfer.add_argument(
+        "--key-file", metavar="JSON",
+        help="GCS service-account JSON key file "
+             "(default: $GCS_KEY_FILE environment variable).",
+    )
+    parent_transfer.add_argument(
         "--overwrite", action="store_true",
         help="Re-upload/re-download even if a matching file already exists.",
     )
@@ -139,9 +218,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
     sub.required = True
 
+    # ls
+    p = sub.add_parser(
+        "ls", parents=[parent_key],
+        help="List objects under a GCS prefix with size and modification time.",
+    )
+    p.add_argument("gs_prefix", metavar="GS_PREFIX",
+                   help="GCS prefix to list, e.g. gs://bucket/runs/run01/")
+    p.add_argument(
+        "-r", "--recursive", action="store_true",
+        help="List all objects recursively (default: top-level items only).",
+    )
+    p.set_defaults(func=cmd_ls)
+
     # upload-file
     p = sub.add_parser(
-        "upload-file", parents=[parent],
+        "upload-file", parents=[parent_transfer],
         help="Upload a single local file to a GCS URI.",
     )
     p.add_argument("local_path", metavar="LOCAL_PATH",
@@ -152,7 +244,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # upload-dir
     p = sub.add_parser(
-        "upload-dir", parents=[parent],
+        "upload-dir", parents=[parent_transfer],
         help="Upload a local directory tree to a GCS prefix.",
     )
     p.add_argument("local_dir", metavar="LOCAL_DIR",
@@ -169,7 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # download-file
     p = sub.add_parser(
-        "download-file", parents=[parent],
+        "download-file", parents=[parent_transfer],
         help="Download a single GCS object to a local directory.",
     )
     p.add_argument("gs_uri", metavar="GS_URI",
@@ -180,7 +272,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # download-dir
     p = sub.add_parser(
-        "download-dir", parents=[parent],
+        "download-dir", parents=[parent_transfer],
         help="Download a GCS prefix (directory) to a local directory.",
     )
     p.add_argument("gs_prefix", metavar="GS_PREFIX",

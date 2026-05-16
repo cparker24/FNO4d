@@ -33,6 +33,7 @@ python gcs.py <command> [options] <positional args>
 
 | Command | Description |
 |---|---|
+| `ls` | List objects under a GCS prefix with size and modification time |
 | `upload-file` | Upload a single local file to a GCS URI |
 | `upload-dir` | Upload a local directory tree to a GCS prefix |
 | `download-file` | Download a single GCS object to a local directory |
@@ -40,13 +41,38 @@ python gcs.py <command> [options] <positional args>
 
 ### Common flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `--key-file JSON` | `$GCS_KEY_FILE` | Service-account JSON key file |
-| `--overwrite` | off | Re-transfer even if a size-matched copy already exists |
-| `--pattern GLOB` | `**/*` | Glob filter for directory commands (relative to source root) |
+| Flag | Commands | Default | Description |
+|---|---|---|---|
+| `--key-file JSON` | all | `$GCS_KEY_FILE` | Service-account JSON key file |
+| `-r`, `--recursive` | `ls` | off | List all objects recursively instead of top-level only |
+| `--overwrite` | transfer commands | off | Re-transfer even if a size-matched copy already exists |
+| `--pattern GLOB` | `*-dir` commands | `**/*` | Glob filter relative to the source root |
 
 ## Examples
+
+**List top-level items** (files + subdirectories)
+```bash
+python gcs.py ls gs://my-bucket/runs/run01/ --key-file service_account.json
+```
+
+Output:
+```
+Listing: gs://my-bucket/runs/run01/
+
+        SIZE  MODIFIED             PATH
+------------------------------------------------------------
+         DIR                       checkpoints/
+         DIR                       logs/
+   4.2 MiB  2025-03-15 14:22:01  model.pt
+   1.1 KiB  2025-03-15 14:22:01  config.yaml
+------------------------------------------------------------
+2 file(s)  2 subdir(s)  total 4.2 MiB
+```
+
+**List all objects recursively**
+```bash
+python gcs.py ls gs://my-bucket/runs/run01/ -r --key-file service_account.json
+```
 
 **Upload a single file**
 ```bash
