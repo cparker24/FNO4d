@@ -47,9 +47,9 @@ from neuralop import Trainer
 from neuralop.training import AdamW
 from neuralop import LpLoss, H1Loss
 
-sys.path.append('../loc_libs')
+sys.path.insert(0, '../loc_libs')
 from read_3d_root import read_3d_data
-from datasets import FluidDataset
+from fluid_datasets import FluidDataset
 from memory_utils import calculate_model_memory, reset_peak_memory, log_peak_memory
 from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint, save_last_checkpoint
 from parse_training_log import TrainingHistory
