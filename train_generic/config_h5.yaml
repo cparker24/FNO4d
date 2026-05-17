@@ -16,8 +16,8 @@
 # ---------------------------------------------------------------------------
 
 # --- mode selection --------------------------------------------------------
-backend:     mlx          # torch | mlx
-data_source: gcs_download        # local | gcs_download
+backend:     torch          # torch | mlx
+data_source: local        # local | gcs_download
                           # (gcs_stream is not supported: h5py requires local paths)
 
 # --- output ----------------------------------------------------------------
@@ -33,12 +33,12 @@ hdf5_dir: ../data         # [local] directory containing .h5 files
 # All files must share grid dimensions (nFeatures, nx, ny, neta, ntau);
 # a ValueError is raised on mismatch.  Files are concatenated in order.
 hdf5_files:
-  #- dAu_25ev_mb.h5
+  - dAu_250ev_mb.h5
   # - dAu_25ev_mb_2.h5             # [local]    add more files here
-  - gs://test_fno/dAu_25ev_mb.h5  # [download] use gs:// URIs instead
-  - gs://test_fno/dAu_25ev_mb_2.h5 
+  #- gs://test_fno/dAu_25ev_mb.h5  # [download] use gs:// URIs instead
+  #- gs://test_fno/dAu_25ev_mb_2.h5 
 
-nevents_in:  10   # events to load (-1 = all across all files)
+nevents_in:  -1   # events to load (-1 = all across all files)
 start_event:  0   # first global event index
 
 # --- GCS authentication [download] -----------------------------------------
@@ -47,12 +47,12 @@ gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
 # --- GCS download cache [download] -----------------------------------------
 local_data_dir:    ../data  # directory where downloaded .h5 files are cached
 overwrite_cache:   false    # true = re-download even if file size matches
-gcs_show_progress: null     # null=auto  true=always  false=never
+gcs_show_progress: false     # null=auto  true=always  false=never
 
 # --- GCS output upload (optional) ------------------------------------------
 # Applies to both data_source modes.  Set gcs_output_prefix to upload odir
 # (logs, curves, metrics) after training.  Remove or set to null to skip.
-gcs_output_prefix: gs://test_fno/runs/run02
+gcs_output_prefix: gs://test_fno/runs/run_dAu_250ev_mb  # e.g. gs://my_bucket/runs/my_run
 
 # --- loading strategy ------------------------------------------------------
 # true  [lazy]  → dat['arr'] is a MultiH5Array.  Data is read from disk
@@ -85,13 +85,14 @@ hidden_channels: 16
 n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
 
 # --- training --------------------------------------------------------------
-n_epochs: 3
+n_epochs: 150
 batch_size: 1
 checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
-min_save_epoch:  null     # skip saves before this epoch; null = from epoch 0
+min_save_epoch:  10     # skip saves before this epoch; null = from epoch 0
 save_last: true           # save final epoch state to model_dir/last_model.*
 eval_interval: 2          # run evaluation every N epochs
-test_batch_sizes: [10]    # eval batch size per test resolution
+test_batch_sizes: [2]    # eval batch size per test resolution
+num_workers: 4            # DataLoader background workers for prefetching; 0 = synchronous (GPU-starving)
 
 # --- optimizer -------------------------------------------------------------
 lr: 8.0e-3

@@ -269,6 +269,14 @@ class MultiH5Array:
 
     # ------------------------------------------------------------------ indexing
 
+    def _open(self, fi):
+        """Return a cached h5py File handle for file index fi (per-process)."""
+        if not hasattr(self, '_handles'):
+            self._handles = {}
+        if fi not in self._handles:
+            self._handles[fi] = self._h5py.File(self._paths[fi], 'r')
+        return self._handles[fi]
+
     def __getitem__(self, idx):
         if isinstance(idx, (int, np.integer)):
             if idx < 0:
@@ -278,8 +286,7 @@ class MultiH5Array:
             g  = self._offset + int(idx)
             fi = self._file_for_global(g)
             li = g - int(self._cumlen[fi])
-            with self._h5py.File(self._paths[fi], 'r') as f:
-                return f['arr'][li]
+            return self._open(fi)['arr'][li]
 
         elif isinstance(idx, slice):
             start, stop, step = idx.indices(self._length)
@@ -311,8 +318,7 @@ class MultiH5Array:
             hi = min(g_stop,  fstop)  - fstart
             if lo >= hi:
                 continue
-            with self._h5py.File(self._paths[fi], 'r') as f:
-                pieces.append(f['arr'][lo:hi])
+            pieces.append(self._open(fi)['arr'][lo:hi])
         if not pieces:
             return np.empty((0,) + self._item_shape, dtype=self._dtype)
         return np.concatenate(pieces, axis=0) if len(pieces) > 1 else pieces[0].copy()

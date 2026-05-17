@@ -133,6 +133,7 @@ tauslice        = _slice(cfg.get('tauslice', [None, -1]))
 lr              = cfg['lr']
 weight_decay    = cfg.get('weight_decay', 1e-4)
 test_batch_sizes = cfg.get('test_batch_sizes', [10])
+num_workers     = cfg.get('num_workers', 0)
 eval_interval   = cfg.get('eval_interval', 2)
 save_last       = cfg.get('save_last', True)
 norm_cfg        = cfg.get('normalization', {'name': 'none'})
@@ -188,6 +189,7 @@ log(f'log_directly:     {log_directly}')
 log(f'AdamW lr:         {lr}')
 log(f'AdamW weight_decay: {weight_decay}')
 log(f'test_batch_sizes: {test_batch_sizes}')
+log(f'num_workers:      {num_workers}')
 log(f'eval_interval:    {eval_interval}')
 log(f'model_dir:        {model_dir}')
 log(f'normalization:    {norm_cfg}')
@@ -313,7 +315,11 @@ else:
 # ---------------------------------------------------------------------------
 # data loaders
 # ---------------------------------------------------------------------------
-train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
+train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True,
+                          num_workers=num_workers,
+                          persistent_workers=(num_workers > 0),
+                          prefetch_factor=(2 if num_workers > 0 else None),
+                          pin_memory=(backend == 'torch'))
 
 test_loaders = {}
 for res, test_bsize in zip(test_resolutions, test_batch_sizes):
@@ -436,5 +442,5 @@ if gcs_output_prefix:
         log._f.flush()
     upload_gcs_dir(odir, f'{gcs_output_prefix}/logs', gcs_key_file,
                    show_progress=gcs_show_progress)
-    #upload_gcs_dir(model_dir, f'{gcs_output_prefix}/checkpoints', gcs_key_file, show_progress=gcs_show_progress)
+    upload_gcs_dir(model_dir, f'{gcs_output_prefix}/checkpoints', gcs_key_file, show_progress=gcs_show_progress)
     log(f'GCS upload complete → {gcs_output_prefix}')
