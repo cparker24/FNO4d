@@ -18,16 +18,16 @@ gcs_key_file: ../train_generic/fnotest-wayne-gcs.json
 #   gcs_download   – download model_dir prefix from GCS to model_local_cache
 #   gcs_stream     – stream .pt checkpoints directly via gcsfs (no local copy);
 #                    safetensors are fetched to a temp file automatically
-model_access: local
-model_dir: ../train_generic/checkpoints             # local path  OR  gs://bucket/prefix
+model_access: gcs_download
+model_dir: gs://test_fno/runs/run_dAu_250ev_mb/checkpoints #./train_generic/checkpoints             # local path  OR  gs://bucket/prefix
 
 # Where to cache downloaded model files (only used for gcs_download)
-model_local_cache: ./cache/models
+model_local_cache: ./cache/models/
 
 # --- Training config ---
 # Path to the config.yaml produced during training.
 # May be a local path OR a gs:// URI (downloaded to model_local_cache).
-train_config: ../train_generic/checkpoints/config.yaml
+train_config: ./cache/models/config.yaml  #./train_generic/checkpoints/config.yaml
 
 # ---------------------------------------------------------------------------
 # Data source
@@ -54,7 +54,7 @@ data_format: auto
 
 # true  → eval on the test split (last 1-train_ratio fraction)
 # false → use all loaded events
-use_train_split: true
+use_train_split: false #true
 
 # Events to load (-1 = all)
 nevents: -1
@@ -62,7 +62,8 @@ nevents: -1
 # Where to cache downloaded data files (only used for gcs_download)
 data_local_cache: ./cache/data
 
-# Re-download even if a size-matched local copy exists
+# If true, re-download from GCS even if a size-matched local copy exists.
+# false = use the local cache (default, avoids redundant downloads).
 gcs_overwrite_cache: false
 
 # Progress bar for downloads: null=auto (TTY only), true=always, false=never
@@ -75,7 +76,7 @@ gcs_show_progress: null
 #   torch         – PyTorch inference
 #   mlx           – MLX inference (safetensors or auto-fallback to PT transfer)
 #   torch_to_mlx  – load PyTorch .pt weights and run in MLX
-backend: torch
+backend: torch_to_mlx
 
 # checkpoint_type:
 #   best / last / checkpoint_N              – native format for the chosen backend
@@ -94,6 +95,12 @@ eval_mode: cont
 # Set to 0 to disable masking (include all cells, including vacuum).
 # Typical value: 0.3 GeV/fm³  (just above QCD freeze-out at T_c ≈ 155 MeV).
 active_threshold: 0.3
+
+# metric_backend:
+#   numpy  – original float64 NumPy path; use for reference / comparison (default)
+#   torch  – PyTorch path; auto-selects CUDA → MPS → CPU; float32; 10-50× faster
+#            for N > 10 events (shell-loop replaced by matmul, FFTs on GPU)
+metric_backend: torch
 
 # ---------------------------------------------------------------------------
 # Output

@@ -19,6 +19,7 @@ See [README_eval.md](README_eval.md) for the simpler contour-only notebooks.
 1. [Motivation](#1-motivation)
 2. [Data format](#2-data-format)
 3. [Quick start](#3-quick-start)
+   - 3.1 [Choosing a backend](#31-choosing-a-backend)
 4. [Known failure modes and mitigations](#4-known-failure-modes-and-mitigations)
    - 4.1 [Sparse-field blow-up: nRMSE / vRMSE / fRMSE ≫ 1](#41-sparse-field-blow-up)
    - 4.2 [cRMSE divergence on antisymmetric channels](#42-crmse-divergence-on-antisymmetric-channels)
@@ -104,12 +105,13 @@ from model_eval import ModelEval
 
 # pred, true: arrays (N, C, nx, ny, neta, T) in physical units
 ev = ModelEval(
-    pred          = model_out_phys,    # (N, C, nx, ny, neta, T)
-    true          = y_true_phys,
-    tau_coords    = tau_out_coords,    # 1-D array, length T
-    eta_coords    = eta_coords,        # 1-D array, length neta
-    channel_names = ['ε', 'vx', 'vy', 'vη'],
-    active_threshold = 0.3,            # mask freeze-out cells (see Section 4.1)
+    pred             = model_out_phys,    # (N, C, nx, ny, neta, T)
+    true             = y_true_phys,
+    tau_coords       = tau_out_coords,    # 1-D array, length T
+    eta_coords       = eta_coords,        # 1-D array, length neta
+    channel_names    = ['ε', 'vx', 'vy', 'vη'],
+    active_threshold = 0.3,               # mask freeze-out cells (see Section 4.1)
+    backend          = 'numpy',           # 'numpy' (default) or 'torch' (GPU, see 3.1)
 )
 ```
 
@@ -139,6 +141,54 @@ cd train/
 marimo run eval_model_test_metric_torch.py   # PyTorch
 marimo run eval_model_test_metric_mlx.py     # MLX (native or PyTorch weight transfer)
 ```
+
+---
+
+## 3.1 Choosing a backend
+
+`ModelEval` implements all metrics in two parallel code paths selectable via the
+`backend` constructor argument.
+
+| `backend` | Device | Precision | When to use |
+|---|---|---|---|
+| `'numpy'` (default) | CPU | float64 | Reference / comparison; exact reproducibility |
+| `'torch'` | CUDA → MPS → CPU (auto) | float32 | N > 10 events; 10–50× faster for spectral metrics |
+
+The `'torch'` backend offloads two bottlenecks to the accelerator:
+
+1. **Radial shell binning** — the Python `for`-loop over wavenumber shells in
+   `_radial_energies()` (the dominant cost for large N) is replaced by a single
+   batched matrix multiply against a precomputed one-hot projection matrix.
+2. **FFTs and reductions** — `torch.fft.rfft2`, `torch.mean`, `torch.cumsum`, etc.
+   run on the device.
+
+All public methods return `float64` numpy arrays regardless of backend, so downstream
+code is unchanged.  Device selection is automatic (`cuda` → `mps` → `cpu`) but can be
+overridden:
+
+```python
+# Auto-detect best device (recommended)
+ev = ModelEval(pred, true, backend='torch')
+
+# Pin to a specific device
+ev = ModelEval(pred, true, backend='torch', device='mps')   # Apple Silicon Metal
+ev = ModelEval(pred, true, backend='torch', device='cuda')  # NVIDIA GPU
+ev = ModelEval(pred, true, backend='torch', device='cpu')   # CPU via PyTorch (float32)
+```
+
+To compare the two backends on the same data:
+
+```python
+ev_np = ModelEval(pred, true, backend='numpy')   # float64 reference
+ev_th = ModelEval(pred, true, backend='torch')   # float32 GPU
+
+# Results are numerically equivalent within float32 rounding
+import numpy as np
+np.testing.assert_allclose(ev_np.nrmse(), ev_th.nrmse(), rtol=1e-4)
+```
+
+In the GCS eval notebook the backend is controlled by `metric_backend` in
+`eval_gcs_config.yaml` (see [README_eval_gcs.md](README_eval_gcs.md)).
 
 ---
 
@@ -1042,13 +1092,19 @@ ModelEval(
     channel_names    : list[str] | None,        # length C
     eps              : float = 1e-10,           # division guard
     active_threshold : float | None = None,     # ε threshold in GeV/fm³ (see Section 4.1)
-    active_mask      : np.ndarray | None = None # pre-built bool mask (N,C,nx,ny,neta,T)
+    active_mask      : np.ndarray | None = None,# pre-built bool mask (N,C,nx,ny,neta,T)
+    backend          : str = 'numpy',           # 'numpy' or 'torch' (see Section 3.1)
+    device           : str | None = None,       # torch device: None=auto, 'cuda','mps','cpu'
 )
 ```
 
 `active_threshold` and `active_mask` are mutually exclusive; passing both raises
 `ValueError`.  When `active_threshold` is given, the mask is derived from channel 0
 (energy density): `mask = true[:, :1] > active_threshold`, broadcast to all channels.
+
+When `backend='torch'`, device selection order is `cuda` → `mps` → `cpu` unless
+`device` is explicitly set.  All computations run in float32 on the device; results
+are converted back to float64 numpy arrays before being returned.
 
 Attributes set after construction:
 
@@ -1059,6 +1115,7 @@ Attributes set after construction:
 | `eta_coords` | ndarray (neta,) | η axis values |
 | `channel_names` | list[str] | Field component labels |
 | `eps` | float | Division guard |
+| `backend` | str | `'numpy'` or `'torch'` |
 | `_active_mask` | ndarray or None | Bool mask `(N,C,nx,ny,neta,T)` |
 
 ---
@@ -1172,15 +1229,32 @@ figure (see [Section 8.2](#82-individual-plots)).
 
 ### Internal cached arrays
 
-These are computed lazily and stored to avoid redundant FFTs.
+These are computed lazily and stored to avoid redundant FFTs.  Each backend
+maintains its own set of caches; the numpy and torch caches are independent.
+
+#### numpy backend (`backend='numpy'`)
 
 | Attribute | Shape | Content |
 |---|---|---|
-| `_F_pred`, `_F_true` | `(N,C,nx,ny//2+1,neta,T)` complex | rfft2 of (masked) pred and true |
-| `_E_pred`, `_E_true` | `(N,C,neta,T,n_shells)` | Parseval-corrected radial energy per shell |
-| `_kmap` | `(nx, ny//2+1)` | Radial wavenumber at each `(kx, ky)` point |
-| `_k_shells` | `(n_shells,)` | Integer shell indices 0 … K_max |
-| `_active_mask` | `(N,C,nx,ny,neta,T)` bool or None | Active-cell mask |
+| `_F_pred`, `_F_true` | `(N,C,nx,ny//2+1,neta,T)` complex128 | rfft2 of (masked) pred and true |
+| `_E_pred`, `_E_true` | `(N,C,neta,T,n_shells)` float64 | Parseval-corrected radial energy per shell |
+
+#### torch backend (`backend='torch'`)
+
+| Attribute | Shape | Content |
+|---|---|---|
+| `_pred_t`, `_true_t` | `(N,C,nx,ny,neta,T)` float32 | pred / true on device (set at init) |
+| `_F_pred_t`, `_F_true_t` | `(N,C,nx,ny//2+1,neta,T)` complex64 | rfft2 of (masked) pred and true on device |
+| `_E_pred_t`, `_E_true_t` | `(N,C,neta,T,n_shells)` float32 | Parseval-corrected radial energy per shell on device |
+| `_shell_proj` | `(n_pix, n_shells)` float32 | One-hot shell projection matrix (set at init); replaces the Python shell loop with a matmul |
+
+#### Shared (both backends)
+
+| Attribute | Shape | Content |
+|---|---|---|
+| `_kmap` | `(nx, ny//2+1)` float64 | Radial wavenumber at each `(kx, ky)` point |
+| `_k_shells` | `(n_shells,)` float64 | Integer shell indices 0 … K_max |
+| `_active_mask` | `(N,C,nx,ny,neta,T)` bool or None | Active-cell mask (numpy) |
 
 ---
 

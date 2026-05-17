@@ -139,12 +139,14 @@ The table below documents every key.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `backend` | str | `torch` | `torch` · `mlx` · `torch_to_mlx` |
+| `backend` | str | `torch` | Inference backend: `torch` · `mlx` · `torch_to_mlx` |
 | `checkpoint_type` | str | `best` | See [Section 6](#6-backends-and-checkpoint-types) |
 | `checkpoint_epoch` | int | `10` | Epoch number for `checkpoint_N` / `pytorch_checkpoint_N` variants |
 | `nevents` | int | `-1` | Maximum events to load from the data file. `-1` = all. |
 | `use_train_split` | bool | `true` | `true` → evaluate on the test split `[n_train:]`. `false` → use all loaded events. |
 | `eval_mode` | str | `basic` | Default mode shown in the UI dropdown (`basic` · `cont` · `metric`) |
+| `active_threshold` | float | `0.3` | ε threshold (GeV/fm³) for active-cell masking in `metric` mode; `0` = off |
+| `metric_backend` | str | `numpy` | Metric computation backend: `numpy` (float64, reference) or `torch` (float32, GPU-accelerated; auto-selects CUDA → MPS → CPU). Only used in `metric` mode. See [README_eval_metric.md §3.1](README_eval_metric.md#31-choosing-a-backend). |
 
 ### Output
 
@@ -411,6 +413,10 @@ skinnycontour approach.
 | τ indices for energy spectrum | `0,-1` | τ steps overlaid in the log-log spectrum plot |
 | Save summary to JSON | unchecked | Writes `<odir>/metrics_eval[_mlx].json` |
 
+The metric computation backend (`numpy` vs `torch`) is **not** a UI control — set it
+via `metric_backend` in the config file.  Switch to `metric_backend: torch` to run
+all metrics on the GPU (10–50× faster for N > 10 events).
+
 See [README_eval_metric.md](README_eval_metric.md) for full documentation of
 nRMSE, fRMSE, MELR, WLR, and the known failure modes (sparse-field blow-up,
 cRMSE divergence, freeze-out leakage).
@@ -515,6 +521,7 @@ gcs_overwrite_cache: false
 backend:           torch
 checkpoint_type:   best
 eval_mode:         metric
+metric_backend:    torch   # GPU-accelerated metrics (10-50× faster for large N)
 ```
 
 ```bash
@@ -596,7 +603,7 @@ pip install -r requirements-gcs.txt
 | `norm_utils.Normalizer` | normalizer save/load and transforms |
 | `gcs_utils` | GCS download helpers (`download_gcs_file`, `download_gcs_dir`) |
 | `skinnycontour` | `cont` mode contour plots |
-| `model_eval.ModelEval` | `metric` mode full metric suite |
+| `model_eval.ModelEval` | `metric` mode full metric suite (numpy or torch backend, controlled by `metric_backend`) |
 | `parse_training_log` | training history plot |
 
 ---

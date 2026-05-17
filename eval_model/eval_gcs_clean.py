@@ -292,21 +292,30 @@ def _(
         from pathlib import Path as _Path
         from model_eval import ModelEval
 
-        _thresh   = active_thresh_ui.value if active_thresh_ui.value > 0 else None
-        _ch       = int(channel_drop_ui.value.split()[0])
-        _ieta     = int(ieta_ui.value)
-        _tau_idx  = [int(t.strip()) for t in spec_tau_ui.value.split(',') if t.strip()]
-        _sfx      = ' — MLX' if backend == 'mlx' else ''
+        _thresh          = active_thresh_ui.value if active_thresh_ui.value > 0 else None
+        _ch              = int(channel_drop_ui.value.split()[0])
+        _tau_idx         = [int(t.strip()) for t in spec_tau_ui.value.split(',') if t.strip()]
+        _sfx             = ' — MLX' if backend == 'mlx' else ''
+        _metric_backend  = eval_cfg.get('metric_backend', 'numpy')
+
+        # η bin closest to η=0 (physically meaningful default, independent of bin ordering)
+        _ieta = int(np.argmin(np.abs(eta_coords - 0.0)))
+
+        # τ step closest to 3 fm/c for the spectral error map panel
+        _itau_3fm = int(np.argmin(np.abs(tau_out_coords - 3.0)))
 
         _evaluator = ModelEval(
             pred=model_out_phys, true=y_true_phys,
             tau_coords=tau_out_coords, eta_coords=eta_coords,
             channel_names=['ε', 'vx', 'vy', 'vη'],
             active_threshold=_thresh,
+            backend=_metric_backend,
         )
 
         # dashboard
-        _fig_dash = _evaluator.plot_dashboard(channel=_ch, ieta=_ieta, tau_indices=_tau_idx)
+        _fig_dash = _evaluator.plot_dashboard(
+            channel=_ch, ieta=_ieta, tau_indices=_tau_idx, itau=_itau_3fm,
+        )
         parts.append(mo.as_html(_fig_dash))
         plt.close(_fig_dash)
 
