@@ -1,12 +1,13 @@
 import marimo
 
-__generated_with = "0.18.4"
+__generated_with = "0.23.6"
 app = marimo.App(width="full")
 
 
 @app.cell
 def _():
     import marimo as mo
+
     return (mo,)
 
 
@@ -29,8 +30,6 @@ def _(mo):
     """)
     return
 
-
-# ── Common UI ────────────────────────────────────────────────────────────────
 
 @app.cell
 def _(mo):
@@ -61,14 +60,20 @@ def _(mo):
         mo.hstack([ckpt_type_ui, ckpt_epoch_ui]),
         mo.hstack([eval_file_ui, nevents_ui]),
     ])
-    return (model_dir_ui, train_cfg_ui, backend_ui, eval_mode_ui, ckpt_type_ui,
-            ckpt_epoch_ui, eval_file_ui, nevents_ui)
+    return (
+        backend_ui,
+        ckpt_epoch_ui,
+        ckpt_type_ui,
+        eval_file_ui,
+        eval_mode_ui,
+        model_dir_ui,
+        nevents_ui,
+        train_cfg_ui,
+    )
 
-
-# ── Data loading ──────────────────────────────────────────────────────────────
 
 @app.cell
-def _(mo, model_dir_ui, train_cfg_ui, backend_ui, eval_mode_ui, eval_file_ui, nevents_ui):
+def _(backend_ui, eval_file_ui, eval_mode_ui, mo, nevents_ui, train_cfg_ui):
     import sys, gc
     sys.path.insert(0, '../loc_libs')
 
@@ -78,6 +83,7 @@ def _(mo, model_dir_ui, train_cfg_ui, backend_ui, eval_mode_ui, eval_file_ui, ne
     from pathlib import Path
 
     from read_3d_root import read_3d_data
+    from read_3d_hdf5 import read_3d_data_hdf5
     from norm_utils import Normalizer
     import parse_training_log
 
@@ -108,8 +114,15 @@ def _(mo, model_dir_ui, train_cfg_ui, backend_ui, eval_mode_ui, eval_file_ui, ne
     def _s(v):
         return slice(None) if v is None else slice(*v)
 
-    input_dir       = train_cfg.get('input_dir', '.')
-    input_files     = train_cfg['input_files']
+    # Support both ROOT-based configs (input_dir/input_files) and
+    # HDF5-based configs (hdf5_dir/hdf5_files).
+    _is_h5_cfg  = 'hdf5_files' in train_cfg
+    if _is_h5_cfg:
+        input_dir   = train_cfg.get('hdf5_dir', '.')
+        input_files = train_cfg['hdf5_files']
+    else:
+        input_dir   = train_cfg.get('input_dir', '.')
+        input_files = train_cfg['input_files']
     train_ratio     = train_cfg.get('train_ratio', 0.8)
     xyslice         = _s(train_cfg.get('xyslice',  [None, -1]))
     etaslice        = _s(train_cfg.get('tauslice', [None, -1]))
@@ -131,13 +144,17 @@ def _(mo, model_dir_ui, train_cfg_ui, backend_ui, eval_mode_ui, eval_file_ui, ne
         _data_path is not None and not _data_path.exists(),
         mo.callout(
             mo.md(f"**Data file not found:** `{data_file}`\n\n"
-                  "Check `input_dir` / `input_files` in the training config, "
+                  "Check `input_dir`/`hdf5_dir` and `input_files`/`hdf5_files` in the training config, "
                   "or set a path in **Separate eval file**."),
             kind="warn",
         ),
     )
     print(f'Loading data: {data_file}')
-    raw = read_3d_data(data_file, nevents=nevents_load)
+    _use_h5 = data_file.endswith('.h5') or data_file.endswith('.hdf5') or _is_h5_cfg
+    if _use_h5:
+        raw = read_3d_data_hdf5(data_file, nevents=nevents_load, lazy=True)
+    else:
+        raw = read_3d_data(data_file, nevents=nevents_load)
 
     grid = {}
     for _k in ('tau_min', 'dtau', 'eta_min', 'deta', 'x_min', 'dx', 'y_min', 'dy'):
@@ -146,27 +163,42 @@ def _(mo, model_dir_ui, train_cfg_ui, backend_ui, eval_mode_ui, eval_file_ui, ne
     print('Grid params:', {k: f'{v:.4g}' for k, v in grid.items()})
 
     arr = raw['arr']
-    arr = arr[:, :, xyslice, xyslice, etaslice, :]
-    print(f'Array shape after slicing: {arr.shape}')
+    #arr = arr[:, :, xyslice, xyslice, etaslice, :]
+    #print(f'Array shape after slicing: {arr.shape}')
 
     n_train = int(arr.shape[0] * train_ratio)
     if use_train_split:
         data_test = arr[n_train:]
+        data_test = data_test[:, :, xyslice, xyslice, etaslice, :]
+        print(f'Array shape after slicing: {data_test.shape}')
         print(f'Train/test split at {n_train}: using {data_test.shape[0]} test events')
     else:
         data_test = arr
+        data_test = data_test[:, :, xyslice, xyslice, etaslice, :]
+        print(f'Array shape after slicing: {data_test.shape}')
         print(f'Using all {data_test.shape[0]} events from eval file')
 
     del arr; gc.collect()
-    return (train_cfg, grid, data_test, hidden_channels, n_modes, odir,
-            backend, eval_mode,
-            np, plt, Path, Normalizer, FNO, parse_training_log)
+    return (
+        FNO,
+        Normalizer,
+        Path,
+        backend,
+        data_test,
+        eval_mode,
+        grid,
+        hidden_channels,
+        n_modes,
+        np,
+        odir,
+        parse_training_log,
+        plt,
+        train_cfg,
+    )
 
-
-# ── Normalizer ────────────────────────────────────────────────────────────────
 
 @app.cell
-def _(model_dir_ui, data_test, Normalizer, Path, np):
+def _(Normalizer, Path, data_test, model_dir_ui):
     model_dir = Path(model_dir_ui.value)
     norm_path = model_dir / 'normalizer.npz'
 
@@ -178,15 +210,20 @@ def _(model_dir_ui, data_test, Normalizer, Path, np):
         normalizer     = None
         data_test_norm = data_test
         print('No normalizer.npz found — using raw data')
+    return data_test_norm, model_dir, normalizer
 
-    return (model_dir, normalizer, data_test_norm)
-
-
-# ── Model loading ─────────────────────────────────────────────────────────────
 
 @app.cell
-def _(mo, model_dir, ckpt_type_ui, ckpt_epoch_ui,
-      hidden_channels, n_modes, FNO, backend):
+def _(
+    FNO,
+    backend,
+    ckpt_epoch_ui,
+    ckpt_type_ui,
+    hidden_channels,
+    mo,
+    model_dir,
+    n_modes,
+):
     ckpt_type = ckpt_type_ui.value
     _epoch    = int(ckpt_epoch_ui.value)
 
@@ -289,14 +326,11 @@ def _(mo, model_dir, ckpt_type_ui, ckpt_epoch_ui,
 
         model.eval()
         print(f'Model: {count_model_params(model):,} parameters, checkpoint: {ckpt_type}')
+    return device, model
 
-    return (model, device)
-
-
-# ── Inference ─────────────────────────────────────────────────────────────────
 
 @app.cell
-def _(model, device, data_test_norm, normalizer, backend, np):
+def _(backend, data_test_norm, device, model, normalizer, np):
     if backend == 'torch':
         import torch as _torch
         def _run_inference(mdl, data, dev):
@@ -341,13 +375,11 @@ def _(model, device, data_test_norm, normalizer, backend, np):
         y_true_phys    = data_test_norm[:, :, :, :, :, 1:]
 
     print(f'Physical shapes — pred: {model_out_phys.shape}, true: {y_true_phys.shape}')
-    return (model_out, model_out_phys, y_true_phys)
+    return model_out_phys, y_true_phys
 
-
-# ── Grid coordinates ──────────────────────────────────────────────────────────
 
 @app.cell
-def _(grid, data_test_norm, np):
+def _(data_test_norm, grid, np):
     nx_eff   = data_test_norm.shape[2]
     ny_eff   = data_test_norm.shape[3]
     neta_eff = data_test_norm.shape[4]
@@ -370,15 +402,21 @@ def _(grid, data_test_norm, np):
           f'y: [{y_coords[0]:.2f}, {y_coords[-1]:.2f}] fm')
     print(f'      η: [{eta_coords[0]:.2f}, {eta_coords[-1]:.2f}]  '
           f'τ_out: [{tau_out_coords[0]:.3f}, {tau_out_coords[-1]:.3f}] fm/c')
+    return (
+        dtau,
+        eta_coords,
+        neta_eff,
+        ntau_out,
+        tau_min,
+        tau_out_coords,
+        x_coords,
+        xy_extent,
+        y_coords,
+    )
 
-    return (nx_eff, ny_eff, neta_eff, ntau_out, dtau, tau_min,
-            x_coords, y_coords, eta_coords, tau_out_coords, xy_extent)
-
-
-# ── Mode-specific controls ────────────────────────────────────────────────────
 
 @app.cell
-def _(mo, neta_eff, data_test_norm, train_cfg, eval_mode):
+def _(data_test_norm, eval_mode, mo, neta_eff, train_cfg):
     _norm      = train_cfg.get('normalization', {})
     _norm_name = _norm.get('name', 'none') if isinstance(_norm, dict) else str(_norm)
     _n_test    = data_test_norm.shape[0]
@@ -430,19 +468,40 @@ def _(mo, neta_eff, data_test_norm, train_cfg, eval_mode):
             mo.hstack([active_thresh_ui, spec_tau_ui, save_json_ui]),
         ])
     _controls
+    return (
+        active_thresh_ui,
+        cdfrats_ui,
+        channel_drop_ui,
+        channel_num_ui,
+        cont_channel_ui,
+        cont_event_ui,
+        cont_ieta_ui,
+        contour_iT_ui,
+        event_ui,
+        ieta_ui,
+        rescale_energy_ui,
+        save_json_ui,
+        spec_tau_ui,
+        tau_idx_ui,
+    )
 
-    return (event_ui, channel_num_ui, channel_drop_ui, tau_idx_ui, ieta_ui,
-            cont_event_ui, cont_ieta_ui, cont_channel_ui,
-            contour_iT_ui, cdfrats_ui, rescale_energy_ui,
-            spec_tau_ui, active_thresh_ui, save_json_ui)
-
-
-# ── Basic: truth/prediction image grids per η bin ────────────────────────────
 
 @app.cell
-def _(model_out_phys, y_true_phys, eta_coords, tau_out_coords, xy_extent,
-      ntau_out, eval_mode,
-      event_ui, ieta_ui, tau_idx_ui, channel_num_ui, plt, mo):
+def _(
+    channel_num_ui,
+    eta_coords,
+    eval_mode,
+    event_ui,
+    ieta_ui,
+    mo,
+    model_out_phys,
+    ntau_out,
+    plt,
+    tau_idx_ui,
+    tau_out_coords,
+    xy_extent,
+    y_true_phys,
+):
     mo.stop(eval_mode != 'basic')
 
     _event   = int(event_ui.value)
@@ -481,16 +540,28 @@ def _(model_out_phys, y_true_phys, eta_coords, tau_out_coords, xy_extent,
             plt.colorbar(_im, ax=_ax, label=_ch_label, fraction=0.046, pad=0.04)
     _fig.tight_layout()
     _fig
+    return
 
-
-# ── Cont: CDF-based skinny contour plots ─────────────────────────────────────
 
 @app.cell
-def _(model_out_phys, y_true_phys, eta_coords, x_coords, y_coords,
-      tau_min, dtau, eval_mode,
-      cont_event_ui, cont_ieta_ui, cont_channel_ui,
-      contour_iT_ui, cdfrats_ui, rescale_energy_ui,
-      np, plt, mo):
+def _(
+    cdfrats_ui,
+    cont_channel_ui,
+    cont_event_ui,
+    cont_ieta_ui,
+    contour_iT_ui,
+    dtau,
+    eta_coords,
+    eval_mode,
+    mo,
+    model_out_phys,
+    plt,
+    rescale_energy_ui,
+    tau_min,
+    x_coords,
+    y_coords,
+    y_true_phys,
+):
     mo.stop(eval_mode != 'cont')
     from skinnycontour import plot_three_bins_contour
 
@@ -538,11 +609,16 @@ def _(model_out_phys, y_true_phys, eta_coords, x_coords, y_coords,
     return
 
 
-# ── Metric: ModelEval initialisation ─────────────────────────────────────────
-
 @app.cell
-def _(model_out_phys, y_true_phys, tau_out_coords, eta_coords,
-      eval_mode, active_thresh_ui, mo):
+def _(
+    active_thresh_ui,
+    eta_coords,
+    eval_mode,
+    mo,
+    model_out_phys,
+    tau_out_coords,
+    y_true_phys,
+):
     mo.stop(eval_mode != 'metric')
     from model_eval import ModelEval
 
@@ -563,11 +639,19 @@ def _(model_out_phys, y_true_phys, tau_out_coords, eta_coords,
     return (evaluator,)
 
 
-# ── Metric: dashboard ─────────────────────────────────────────────────────────
-
 @app.cell
-def _(evaluator, channel_drop_ui, ieta_ui, spec_tau_ui,
-      save_json_ui, odir, backend, mo, plt, Path):
+def _(
+    Path,
+    backend,
+    channel_drop_ui,
+    evaluator,
+    ieta_ui,
+    mo,
+    odir,
+    plt,
+    save_json_ui,
+    spec_tau_ui,
+):
     import json
 
     _ch      = int(channel_drop_ui.value.split()[0])
@@ -589,10 +673,8 @@ def _(evaluator, channel_drop_ui, ieta_ui, spec_tau_ui,
     return
 
 
-# ── Metric: per-channel nRMSE heatmap ────────────────────────────────────────
-
 @app.cell
-def _(evaluator, tau_out_coords, eta_coords, backend, plt, mo):
+def _(backend, eta_coords, evaluator, mo, plt, tau_out_coords):
     _nrmse    = evaluator.nrmse()
     _ch_names = evaluator.channel_names
     _sfx      = ' — MLX' if backend == 'mlx' else ''
@@ -616,10 +698,16 @@ def _(evaluator, tau_out_coords, eta_coords, backend, plt, mo):
     return
 
 
-# ── Metric: fRMSE heatmaps ────────────────────────────────────────────────────
-
 @app.cell
-def _(evaluator, tau_out_coords, eta_coords, channel_drop_ui, backend, plt, mo):
+def _(
+    backend,
+    channel_drop_ui,
+    eta_coords,
+    evaluator,
+    mo,
+    plt,
+    tau_out_coords,
+):
     _ch    = int(channel_drop_ui.value.split()[0])
     _frmse = evaluator.frmse()
     _sfx   = ' — MLX' if backend == 'mlx' else ''
@@ -642,8 +730,6 @@ def _(evaluator, tau_out_coords, eta_coords, channel_drop_ui, backend, plt, mo):
     return
 
 
-# ── Metric: scalar summary table ─────────────────────────────────────────────
-
 @app.cell
 def _(evaluator, mo):
     _s = evaluator.summary()
@@ -652,13 +738,23 @@ def _(evaluator, mo):
         '| Metric | Value |\n|---|---|\n'
         + '\n'.join(f'| `{k}` | {v:.6g} |' for k, v in _s.items())
     )
+    return
 
-
-# ── Relative L² error (basic + cont) ─────────────────────────────────────────
 
 @app.cell
-def _(model_out_phys, y_true_phys, eta_coords, tau_out_coords,
-      neta_eff, channel_num_ui, backend, eval_mode, np, plt, mo):
+def _(
+    backend,
+    channel_num_ui,
+    eta_coords,
+    eval_mode,
+    mo,
+    model_out_phys,
+    neta_eff,
+    np,
+    plt,
+    tau_out_coords,
+    y_true_phys,
+):
     mo.stop(eval_mode == 'metric')
 
     _ch     = int(channel_num_ui.value)
@@ -676,13 +772,11 @@ def _(model_out_phys, y_true_phys, eta_coords, tau_out_coords,
     _ax4.legend(fontsize=7, ncol=2)
     _ax4.grid(True, alpha=0.3)
     _fig4.tight_layout()
-    return _fig4
+    return
 
-
-# ── Training history ──────────────────────────────────────────────────────────
 
 @app.cell
-def _(odir, backend, parse_training_log, plt, Path):
+def _(Path, backend, odir, parse_training_log, plt):
     _sfx = '_mlx' if backend == 'mlx' else ''
     _p   = Path(odir) / f'metrics{_sfx}.json'
     if _p.exists():
