@@ -16,7 +16,7 @@
 # ---------------------------------------------------------------------------
 
 # --- mode selection --------------------------------------------------------
-backend:     torch          # torch | mlx
+backend:     mlx          # torch | mlx
 data_source: local        # local | gcs_download
                           # (gcs_stream is not supported: h5py requires local paths)
 
@@ -33,12 +33,12 @@ hdf5_dir: ../data         # [local] directory containing .h5 files
 # All files must share grid dimensions (nFeatures, nx, ny, neta, ntau);
 # a ValueError is raised on mismatch.  Files are concatenated in order.
 hdf5_files:
-  - dAu_250ev_mb.h5
+  - dAu_25ev_mb.h5
   # - dAu_25ev_mb_2.h5             # [local]    add more files here
   #- gs://test_fno/dAu_25ev_mb.h5  # [download] use gs:// URIs instead
   #- gs://test_fno/dAu_25ev_mb_2.h5 
 
-nevents_in:  -1   # events to load (-1 = all across all files)
+nevents_in:  10   # events to load (-1 = all across all files)
 start_event:  0   # first global event index
 
 # --- GCS authentication [download] -----------------------------------------
@@ -52,7 +52,7 @@ gcs_show_progress: false     # null=auto  true=always  false=never
 # --- GCS output upload (optional) ------------------------------------------
 # Applies to both data_source modes.  Set gcs_output_prefix to upload odir
 # (logs, curves, metrics) after training.  Remove or set to null to skip.
-gcs_output_prefix: gs://test_fno/runs/run_dAu_250ev_mb  # e.g. gs://my_bucket/runs/my_run
+#gcs_output_prefix: gs://test_fno/runs/run01  # e.g. gs://my_bucket/runs/my_run
 
 # --- loading strategy ------------------------------------------------------
 # true  [lazy]  → dat['arr'] is a MultiH5Array.  Data is read from disk
@@ -85,7 +85,7 @@ hidden_channels: 16
 n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
 
 # --- training --------------------------------------------------------------
-n_epochs: 150
+n_epochs: 1
 batch_size: 1
 checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
 min_save_epoch:  10     # skip saves before this epoch; null = from epoch 0

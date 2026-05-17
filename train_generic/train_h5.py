@@ -189,7 +189,8 @@ log(f'log_directly:     {log_directly}')
 log(f'AdamW lr:         {lr}')
 log(f'AdamW weight_decay: {weight_decay}')
 log(f'test_batch_sizes: {test_batch_sizes}')
-log(f'num_workers:      {num_workers}')
+if backend == 'torch':
+    log(f'num_workers:      {num_workers}')
 log(f'eval_interval:    {eval_interval}')
 log(f'model_dir:        {model_dir}')
 log(f'normalization:    {norm_cfg}')
@@ -315,11 +316,16 @@ else:
 # ---------------------------------------------------------------------------
 # data loaders
 # ---------------------------------------------------------------------------
+_nw      = num_workers if backend == 'torch' else 0
+_pin     = backend == 'torch'
+_persist = _nw > 0
+_prefetch = 2 if _nw > 0 else None
+
 train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True,
-                          num_workers=num_workers,
-                          persistent_workers=(num_workers > 0),
-                          prefetch_factor=(2 if num_workers > 0 else None),
-                          pin_memory=(backend == 'torch'))
+                          num_workers=_nw,
+                          persistent_workers=_persist,
+                          prefetch_factor=_prefetch,
+                          pin_memory=_pin)
 
 test_loaders = {}
 for res, test_bsize in zip(test_resolutions, test_batch_sizes):
@@ -327,9 +333,10 @@ for res, test_bsize in zip(test_resolutions, test_batch_sizes):
     test_loaders[res] = DataLoader(dataset_val,
                                    batch_size=test_bsize,
                                    shuffle=False,
-                                   num_workers=0,
-                                   pin_memory=False,
-                                   persistent_workers=False)
+                                   num_workers=_nw,
+                                   persistent_workers=_persist,
+                                   prefetch_factor=_prefetch,
+                                   pin_memory=_pin)
 gc.collect()
 
 # ---------------------------------------------------------------------------
