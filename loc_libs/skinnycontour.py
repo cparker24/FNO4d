@@ -301,4 +301,3 @@ def plot_three_bins_contour (P, T, iparam=0, event=0, tau0=0.5, taudelta=0.1, iT
     fig.suptitle(f'{tag} Event {event}. Contours: Truth: black. FNO: red.', fontsize=16)
     if save:
         fig.savefig(save)
-    plt.show()

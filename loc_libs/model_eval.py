@@ -38,7 +38,16 @@ Known failure modes
              Only cells where true[channel_0] > threshold are included in
              the normalized averages and in the FFTs.
 
-2. cRMSE undefined for symmetric channels (vx, vy, vη)
+2. cRMSE blow-up with vacuum cells (cRMSE >> 1 even for channel 0)
+   Cause   : the volume integral is summed over ALL cells including vacuum /
+             freeze-out ones.  If the model predicts non-zero ε in vacuum
+             cells the numerator accumulates without a matching increase in
+             the denominator, driving cRMSE → 10¹¹.
+   Fix     : pass active_threshold to ModelEval; cRMSE now respects the
+             active_mask and sums only over active cells (same masking as
+             nRMSE and vRMSE).
+
+3. cRMSE undefined for symmetric channels (vx, vy, vη)
    Cause   : velocity fields are antisymmetric → their volume integral ≈ 0
              → denominator collapses to eps → cRMSE → 10¹³.
    Fix     : the denominator is now max(|signed_sum|, 0.01 * L1_sum).
@@ -280,10 +289,20 @@ class ModelEval:
         magnitude, giving a physically meaningful bound instead of diverging
         to 10¹³.  Velocity cRMSE values remain approximate; channel 0 is the
         primary conservation diagnostic.
+
+        When active_mask is set the integral is restricted to active cells only,
+        preventing vacuum / freeze-out cells from contributing zero-denominator
+        or large-prediction-error terms that inflate the ratio.
         """
-        int_p     = self.pred.sum(axis=(2, 3, 4))          # (N, C, T)
-        int_t     = self.true.sum(axis=(2, 3, 4))
-        int_abs_t = np.abs(self.true).sum(axis=(2, 3, 4))  # L1 volume integral
+        if self._active_mask is not None:
+            mf        = self._active_mask.astype(np.float64)
+            int_p     = (self.pred * mf).sum(axis=(2, 3, 4))       # (N, C, T)
+            int_t     = (self.true * mf).sum(axis=(2, 3, 4))
+            int_abs_t = (np.abs(self.true) * mf).sum(axis=(2, 3, 4))
+        else:
+            int_p     = self.pred.sum(axis=(2, 3, 4))               # (N, C, T)
+            int_t     = self.true.sum(axis=(2, 3, 4))
+            int_abs_t = np.abs(self.true).sum(axis=(2, 3, 4))
         denom = np.maximum(np.abs(int_t), 0.01 * int_abs_t) + self.eps
         rel   = np.abs(int_p - int_t) / denom
         return rel.mean(axis=0)                                        # (C, T)
@@ -471,6 +490,8 @@ class ModelEval:
         which is the only channel where the signed volume integral is physically
         meaningful as a conservation proxy.
         cRMSE_all is the mean over all channels using the L1-floored denominator.
+        When active_threshold is set, cRMSE is computed over active cells only
+        (consistent with nRMSE and vRMSE masking).
         active_frac shows what fraction of cells were included in normalized
         metrics (1.0 when no active_mask / active_threshold was set).
         """

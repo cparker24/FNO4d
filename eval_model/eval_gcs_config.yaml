@@ -1,0 +1,101 @@
+# ---------------------------------------------------------------------------
+# FNO eval-GCS configuration
+# Used by eval_gcs.py  (marimo run eval_gcs.py)
+#
+# Override path via:  EVAL_GCS_CONFIG=/path/to/this.yaml marimo run eval_gcs.py
+# ---------------------------------------------------------------------------
+
+# --- GCS authentication ---
+# Path to a service-account JSON key file.
+# Set to null (or remove) when all sources are local.
+gcs_key_file: ../train_generic/fnotest-wayne-gcs.json
+
+# ---------------------------------------------------------------------------
+# Model source
+# ---------------------------------------------------------------------------
+# model_access:
+#   local          – model_dir is a local path (default)
+#   gcs_download   – download model_dir prefix from GCS to model_local_cache
+#   gcs_stream     – stream .pt checkpoints directly via gcsfs (no local copy);
+#                    safetensors are fetched to a temp file automatically
+model_access: local
+model_dir: ../train_generic/checkpoints             # local path  OR  gs://bucket/prefix
+
+# Where to cache downloaded model files (only used for gcs_download)
+model_local_cache: ./cache/models
+
+# --- Training config ---
+# Path to the config.yaml produced during training.
+# May be a local path OR a gs:// URI (downloaded to model_local_cache).
+train_config: ../train_generic/checkpoints/config.yaml
+
+# ---------------------------------------------------------------------------
+# Data source
+# ---------------------------------------------------------------------------
+# data_access:
+#   local          – resolve paths from training config (or data_files below)
+#   gcs_stream     – stream ROOT files directly via uproot + gcsfs
+#                    (HDF5 streaming is NOT supported; use gcs_download)
+#   gcs_download   – download data files to data_local_cache first
+data_access: local
+
+# Override data files (leave commented out to use the training config's file list).
+# Must be full gs:// URIs when data_access is gcs_stream / gcs_download.
+data_files:
+  - ../data/dAu_50ev_mb_test.h5                   # [local]    bare filename (prepend data_local_cache or input_dir)
+  # - gs://my-bucket/data/dAu_25ev_mb.root  # [gcs_*]   full gs:// URI
+  # - gs://my-bucket/data/dAu_25ev_mb.h5    # [gcs_download] HDF5 from GCS
+
+# data_format:
+#   auto   – infer from file extension (.h5/.hdf5 → h5, .root → root)
+#   root   – force ROOT reader (read_3d_root)
+#   h5     – force HDF5 reader (read_3d_hdf5)
+data_format: auto
+
+# true  → eval on the test split (last 1-train_ratio fraction)
+# false → use all loaded events
+use_train_split: true
+
+# Events to load (-1 = all)
+nevents: -1
+
+# Where to cache downloaded data files (only used for gcs_download)
+data_local_cache: ./cache/data
+
+# Re-download even if a size-matched local copy exists
+gcs_overwrite_cache: false
+
+# Progress bar for downloads: null=auto (TTY only), true=always, false=never
+gcs_show_progress: null
+
+# ---------------------------------------------------------------------------
+# Eval options
+# ---------------------------------------------------------------------------
+# backend:
+#   torch         – PyTorch inference
+#   mlx           – MLX inference (safetensors or auto-fallback to PT transfer)
+#   torch_to_mlx  – load PyTorch .pt weights and run in MLX
+backend: torch
+
+# checkpoint_type:
+#   best / last / checkpoint_N              – native format for the chosen backend
+#   pytorch_best / pytorch_last / pytorch_checkpoint_N
+#                                           – force PyTorch weight transfer into MLX
+checkpoint_type: best
+
+# Epoch number — only relevant when checkpoint_type ends in _N
+checkpoint_epoch: 10
+
+# Default eval mode shown in the UI (basic | cont | metric)
+eval_mode: cont
+
+# Active energy-density threshold for metric masking (GeV/fm³).
+# Cells where true ε < this value are excluded from nRMSE, vRMSE, and cRMSE.
+# Set to 0 to disable masking (include all cells, including vacuum).
+# Typical value: 0.3 GeV/fm³  (just above QCD freeze-out at T_c ≈ 155 MeV).
+active_threshold: 0.3
+
+# ---------------------------------------------------------------------------
+# Output
+# ---------------------------------------------------------------------------
+odir: ./out
