@@ -1,11 +1,12 @@
 # train_generic — Unified FNO Training Script
 
-Two training scripts cover all supported input formats:
+Three training scripts cover all supported input formats:
 
-| Script | Input format | Config |
-|--------|-------------|--------|
-| `train.py` | ROOT files (`.root`) — local or GCS | `config.yaml` |
-| `train_h5.py` | Pre-converted HDF5 files (`.h5`) | `config_h5.yaml` |
+| Script | Purpose | Input format | Config |
+|--------|---------|-------------|--------|
+| `train.py` | Fresh training | ROOT files (`.root`) — local or GCS | `config.yaml` |
+| `train_h5.py` | Fresh training | Pre-converted HDF5 files (`.h5`) | `config_h5.yaml` |
+| `resume_train_h5.py` | Resume from checkpoint | Pre-converted HDF5 files (`.h5`) | `config_h5_resume.yaml` |
 
 ## Quick start
 
@@ -17,6 +18,9 @@ python train.py --config config.yaml
 
 # HDF5-based (multiple files, lazy or eager)
 python train_h5.py --config config_h5.yaml
+
+# Resume HDF5 training from last checkpoint
+python resume_train_h5.py --config config_h5_resume.yaml
 ```
 
 ## train.py — ROOT input
@@ -382,4 +386,193 @@ lazy: true
 lazy:        true
 start_event: 500
 nevents_in:  -1   # all events from index 500 onward
+```
+
+---
+
+## resume_train_h5.py — Resume from checkpoint
+
+`resume_train_h5.py` picks up where a `train_h5.py` run left off.  It shares
+the identical data pipeline and model construction with `train_h5.py`; the
+only difference is that model weights (and, where available, optimizer state)
+are loaded from a saved checkpoint before training begins.
+
+The log file is opened in **append mode** so the prior training history is
+preserved.
+
+### Resume scenarios
+
+**1. Same machine, same backend (most common)**
+
+Set `total_epochs` to the final target epoch count and point
+`resume_model_dir` at the original `model_dir`:
+
+```yaml
+backend:             mlx      # or torch
+resume_model_source: local
+resume_model_dir:    ./checkpoints
+checkpoint_type:     last
+total_epochs:        200      # must exceed the last saved epoch
+```
+
+**2. Resume from a periodic checkpoint**
+
+```yaml
+resume_model_source: local
+resume_model_dir:    ./checkpoints
+checkpoint_type:     periodic
+checkpoint_epoch:    50       # loads ./checkpoints/checkpoint_50/
+total_epochs:        200
+```
+
+**3. Resume from GCS (download checkpoint, train locally)**
+
+```yaml
+resume_model_source: gcs_download
+resume_model_dir:    gs://my-bucket/runs/run01/checkpoints
+local_model_cache:   ./cache/checkpoints
+gcs_key_file:        ./my-service-account.json
+checkpoint_type:     last
+total_epochs:        200
+```
+
+Only the files needed for the selected `checkpoint_type` are downloaded:
+- `last` — downloads the full checkpoint directory (contains `last_model.*`).
+- `periodic` — downloads only the `checkpoint_N/` subdirectory.
+
+**4. Cross-backend: torch → mlx weight transfer**
+
+Train on a CUDA machine with `backend: torch`, then continue on an Apple
+Silicon Mac with `backend: mlx`:
+
+```yaml
+backend:             mlx
+resume_backend:      torch
+resume_model_source: local    # or gcs_download
+resume_model_dir:    ./checkpoints
+checkpoint_type:     last     # only 'last' is supported cross-backend
+total_epochs:        200
+```
+
+Weights are transferred via `neuralop_mlx.weight_transfer.load_from_torch`.
+Optimizer state is **not** transferred (incompatible across frameworks); the
+AdamW optimizer restarts from the configured `lr`.
+
+### Checkpoint optimizer state availability
+
+| Backend | `checkpoint_type` | Optimizer restored? |
+|---------|-------------------|---------------------|
+| torch | `last` | yes — from `last_model.pt` |
+| torch | `periodic` | no — neuralop's `checkpoint()` saves model weights only |
+| mlx | `last` | yes — from `last_optimizer.safetensors` |
+| mlx | `periodic` | yes — if `patch_trainer_checkpoint` was called with `optimizer=` |
+| torch → mlx | `last` | no — cross-backend transfer restarts optimizer |
+
+### Normalizer handling
+
+The script searches for `normalizer.npz` in this order:
+1. `ckpt_dir/normalizer.npz`
+2. `model_dir/normalizer.npz`
+3. Falls back to building fresh from the training data (prints a warning).
+
+For data-driven normalizers (`etau75_eta_3d`, `etau75_eta_shape_3d`) the saved
+`ref` array is restored from disk — no re-fitting is needed.
+
+The normalizer is always re-saved to `model_dir/normalizer.npz` after loading
+so it stays in sync with the resumed weights.
+
+---
+
+## Configuration reference — `config_h5_resume.yaml`
+
+All keys from `config_h5.yaml` are valid.  The table below describes the
+resume-specific additions only.
+
+### Resume control
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `total_epochs` | — | **Required.** Final epoch target. `remaining = total_epochs − resume_epoch`. Must exceed the last saved epoch. |
+| `resume_model_source` | `local` | `local` \| `gcs_download` — where the checkpoint lives |
+| `resume_model_dir` | `model_dir` | Local path or `gs://` URI of the checkpoint directory. Defaults to `model_dir` when omitted. |
+| `local_model_cache` | `./cache/checkpoints` | `[gcs_download]` Where to cache the downloaded checkpoint |
+| `checkpoint_type` | `last` | `last` \| `periodic` — which saved state to load |
+| `checkpoint_epoch` | — | `[periodic]` Epoch number N of the `checkpoint_N/` subdirectory |
+| `resume_backend` | `null` | Backend that produced the checkpoint. `null` = same as `backend`. Set to `torch` for torch→mlx transfer. |
+
+### Outputs
+
+In addition to the standard `train_h5.py` outputs, the resume script writes:
+
+| File | Backend | Description |
+|------|---------|-------------|
+| `metrics_resume.json` | torch | Metrics for the resumed portion only |
+| `metrics_mlx_resume.json` | mlx | Metrics for the resumed portion only |
+| `training_curves_resume.svg` | torch | Loss/metric plot for the resumed portion |
+| `training_curves_mlx_resume.svg` | mlx | Loss/metric plot for the resumed portion |
+
+The full training history (including the original run) is in the appended
+`training.log` / `training_mlx.log`.
+
+## Examples — Resume
+
+### Same machine, MLX, resume from last
+
+```yaml
+backend:             mlx
+data_source:         local
+hdf5_dir:            ../data
+hdf5_files:
+  - dAu_250ev_mb.h5
+total_epochs:        200
+resume_model_source: local
+resume_model_dir:    ./checkpoints
+checkpoint_type:     last
+```
+
+### Same machine, PyTorch, resume from periodic checkpoint
+
+```yaml
+backend:             torch
+data_source:         local
+hdf5_dir:            /data/flat
+hdf5_files:
+  - dAu_250ev_mb.h5
+total_epochs:        300
+resume_model_source: local
+resume_model_dir:    ./checkpoints
+checkpoint_type:     periodic
+checkpoint_epoch:    100
+```
+
+### GCS download checkpoint, MLX
+
+```yaml
+backend:             mlx
+data_source:         local
+hdf5_dir:            ../data
+hdf5_files:
+  - dAu_250ev_mb.h5
+total_epochs:        200
+resume_model_source: gcs_download
+resume_model_dir:    gs://my-bucket/runs/run01/checkpoints
+local_model_cache:   ./cache/checkpoints
+gcs_key_file:        ./fnotest-wayne-gcs.json
+checkpoint_type:     last
+```
+
+### Cross-backend: torch → mlx
+
+```yaml
+backend:             mlx
+resume_backend:      torch
+data_source:         local
+hdf5_dir:            ../data
+hdf5_files:
+  - dAu_250ev_mb.h5
+total_epochs:        200
+resume_model_source: local
+resume_model_dir:    ./checkpoints   # contains last_model.pt from torch run
+checkpoint_type:     last
+lr:                  8.0e-3          # optimizer restarts; set desired lr
 ```
