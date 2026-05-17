@@ -323,9 +323,12 @@ def download_gcs_prefix(gs_prefix: str, local_dir: str, key_file: str,
 
         if not overwrite and local_path.exists():
             if local_path.stat().st_size == blob.size:
-                print(f"[GCS] {blob.name}  →  cached ({blob.size / 1024**2:.1f} MiB)")
+                print(f"[GCS] {blob.name}  →  cached ({blob.size / 1024**2:.1f} MiB)  — skipping")
                 local_paths.append(str(local_path))
                 continue
+            print(f"[GCS] {blob.name}  size mismatch "
+                  f"(local {local_path.stat().st_size} B vs remote {blob.size} B)"
+                  f"  — re-downloading")
 
         print(f"[GCS] {blob.name}  →  {local_path}  ({blob.size / 1024**2:.1f} MiB)")
         _download_blob(blob, local_path, label=Path(blob.name).name,
@@ -590,7 +593,7 @@ def download_gcs_dir(gs_prefix: str, local_dir: str, key_file: str,
               f" gs://{bucket_name}/{blob_prefix}/")
         return []
 
-    print(f"[GCS] downloading {len(matched)} of {len(all_blobs)} object(s)"
+    print(f"[GCS] syncing {len(matched)} of {len(all_blobs)} object(s)"
           f" from gs://{bucket_name}/{blob_prefix}/  →  {local_dir}/")
 
     local_paths = []
@@ -604,6 +607,9 @@ def download_gcs_dir(gs_prefix: str, local_dir: str, key_file: str,
                 print(f"[GCS]   {rel}  already cached ({size_mib:.1f} MiB)  — skipping")
                 local_paths.append(str(local_path))
                 continue
+            print(f"[GCS]   {rel}  size mismatch "
+                  f"(local {local_path.stat().st_size} B vs remote {blob.size} B)"
+                  f"  — re-downloading")
 
         print(f"[GCS]   {rel}  ({size_mib:.1f} MiB)")
         _download_blob(blob, local_path, label=rel, show_progress=show_progress)
