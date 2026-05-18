@@ -137,6 +137,24 @@ def load_train_config(eval_cfg: dict, gcs_fs, gcs_key: Optional[str]) -> dict:
         ))
     else:
         local_cfg = Path(src)
+        # If the local file doesn't exist yet and the model is being downloaded from
+        # GCS, try fetching config.yaml directly from the GCS model directory.
+        # This handles the common case where train_config points inside
+        # model_local_cache but resolve_model_dir hasn't run yet.
+        if not local_cfg.exists() and eval_cfg.get('model_access', 'local') == 'gcs_download':
+            model_dir = eval_cfg.get('model_dir', '')
+            if str(model_dir).startswith('gs://'):
+                if gcs_fs is None:
+                    raise RuntimeError(
+                        f"GCS auth required to fetch training config from model_dir: {model_dir}"
+                    )
+                gcs_cfg_uri = str(model_dir).rstrip('/') + '/config.yaml'
+                print(f'[train_config] {local_cfg} not found — fetching from {gcs_cfg_uri}')
+                model_cache.mkdir(parents=True, exist_ok=True)
+                local_cfg = Path(download_gcs_file(
+                    gcs_cfg_uri, str(model_cache), gcs_key,
+                    overwrite=eval_cfg.get('gcs_overwrite_cache', False),
+                ))
 
     if not local_cfg.exists():
         raise FileNotFoundError(
