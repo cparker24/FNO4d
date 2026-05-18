@@ -1,9 +1,12 @@
-"""LpLoss and H1Loss — MLX ports of neuralop/losses/data_losses.py.
+"""LpLoss, H1Loss, CombinedTemporalLoss — MLX loss functions for FNO training.
 
-Supports spatial dimensionality d=1..4 (same constraint as PyTorch H1Loss).
+LpLoss / H1Loss are ports of neuralop/losses/data_losses.py (d=1..4).
+CombinedTemporalLoss is an MLX port of loc_libs/LossFn.py for 3+1D tensors.
 """
 
 import math
+from typing import Dict, Literal, Optional, Tuple
+
 import mlx.core as mx
 
 
@@ -138,3 +141,207 @@ class H1Loss:
 
     def __call__(self, x, y, **kwargs):
         return self.rel(x, y)
+
+
+# ---------------------------------------------------------------------------
+# Presets for CombinedTemporalLoss
+# ---------------------------------------------------------------------------
+
+_PRESETS: Dict[str, Tuple[float, float]] = {
+    'l2':         (1.0, 0.0),
+    'h1':         (1.0, 1.0),
+    'grad_focus': (0.5, 2.0),
+    'smooth':     (1.0, 0.1),
+    'boundary':   (0.0, 1.0),
+    'custom':     (None, None),
+}
+
+Mode = Literal['relative', 'absolute']
+
+
+class CombinedTemporalLoss:
+    """Combined temporally-weighted L² + spatial-gradient loss for 3+1D FNO.
+
+    MLX port of loc_libs/LossFn.CombinedTemporalLoss. Tensor layout: (B, C, X, Y, Z, T).
+
+    Loss
+    ----
+        L = α · L_value  +  β · L_grad
+
+    where each component is computed per τ-slice and weighted-summed over T:
+
+        Relative:   L_value(t) = Σ |û_t - u_t|²  /  Σ |u_t|²
+        Absolute:   L_value(t) = mean |û_t - u_t|²
+
+        Relative:   L_grad(t)  = Σ |∇(û_t-u_t)|²  /  Σ |∇u_t|²
+        Absolute:   L_grad(t)  = mean |∇(û_t-u_t)|²
+
+    Parameters
+    ----------
+    alpha, beta : float
+        Weights on the L² and gradient components respectively.
+    preset : str
+        Named (α, β) pair — 'l2', 'h1', 'grad_focus', 'smooth', 'boundary', 'custom'.
+    mode : {'relative', 'absolute'}
+        Applied to both components; overridden per-component by l2_mode/grad_mode.
+    l2_mode, grad_mode : {'relative', 'absolute'} or None
+        Per-component mode overrides.
+    tau_weights : mx.array of shape (T,), optional
+        L1-normalised temporal quadrature weights. Uniform 1/T by default.
+    eps : float
+        Denominator stabiliser for relative mode.
+    reduction : {'mean', 'sum'}
+        Aggregation over the batch dimension.
+    """
+
+    def __init__(
+        self,
+        alpha:       float                  = 1.0,
+        beta:        float                  = 1.0,
+        preset:      str                    = 'h1',
+        mode:        Mode                   = 'relative',
+        l2_mode:     Optional[Mode]         = None,
+        grad_mode:   Optional[Mode]         = None,
+        tau_weights: Optional[mx.array]     = None,
+        eps:         float                  = 1e-8,
+        reduction:   str                    = 'mean',
+    ):
+        if preset not in _PRESETS:
+            raise ValueError(f"Unknown preset '{preset}'. Choose from: {list(_PRESETS)}.")
+        if preset != 'custom':
+            alpha, beta = _PRESETS[preset]
+
+        self.alpha = float(alpha)
+        self.beta  = float(beta)
+        self.l2_mode   = l2_mode   if l2_mode   is not None else mode
+        self.grad_mode = grad_mode if grad_mode is not None else mode
+
+        for name, m in (('l2_mode', self.l2_mode), ('grad_mode', self.grad_mode)):
+            if m not in ('relative', 'absolute'):
+                raise ValueError(f"{name} must be 'relative' or 'absolute', got '{m}'.")
+
+        self.tau_weights = tau_weights
+        self.eps         = float(eps)
+        self.reduction   = reduction
+        self.preset      = preset
+
+    # ------------------------------------------------------------------
+    # Temporal weights
+    # ------------------------------------------------------------------
+
+    def _weights(self, T: int) -> mx.array:
+        if self.tau_weights is not None:
+            return self.tau_weights
+        return mx.ones((T,)) / T
+
+    # ------------------------------------------------------------------
+    # Spatial norms — (B, C, X, Y, Z) → (B, C)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _sq_sum(f: mx.array) -> mx.array:
+        return mx.sum(f ** 2, axis=(-3, -2, -1))
+
+    @staticmethod
+    def _sq_mean(f: mx.array) -> mx.array:
+        return mx.mean(f ** 2, axis=(-3, -2, -1))
+
+    @staticmethod
+    def _grad_sq_sum(f: mx.array) -> mx.array:
+        gx = mx.roll(f, -1, axis=-3) - mx.roll(f, 1, axis=-3)
+        gy = mx.roll(f, -1, axis=-2) - mx.roll(f, 1, axis=-2)
+        gz = mx.roll(f, -1, axis=-1) - mx.roll(f, 1, axis=-1)
+        return mx.sum(gx ** 2 + gy ** 2 + gz ** 2, axis=(-3, -2, -1))
+
+    @staticmethod
+    def _grad_sq_mean(f: mx.array) -> mx.array:
+        gx = mx.roll(f, -1, axis=-3) - mx.roll(f, 1, axis=-3)
+        gy = mx.roll(f, -1, axis=-2) - mx.roll(f, 1, axis=-2)
+        gz = mx.roll(f, -1, axis=-1) - mx.roll(f, 1, axis=-1)
+        return mx.mean(gx ** 2 + gy ** 2 + gz ** 2, axis=(-3, -2, -1))
+
+    # ------------------------------------------------------------------
+    # Per-slice component losses — (B, C, X, Y, Z) → (B,)
+    # ------------------------------------------------------------------
+
+    def _l2_slice(self, diff: mx.array, target: mx.array) -> mx.array:
+        if self.l2_mode == 'relative':
+            per_bc = self._sq_sum(diff) / (self._sq_sum(target) + self.eps)
+        else:
+            per_bc = self._sq_mean(diff)
+        return mx.mean(per_bc, axis=-1)
+
+    def _grad_slice(self, diff: mx.array, target: mx.array) -> mx.array:
+        if self.grad_mode == 'relative':
+            per_bc = self._grad_sq_sum(diff) / (self._grad_sq_sum(target) + self.eps)
+        else:
+            per_bc = self._grad_sq_mean(diff)
+        return mx.mean(per_bc, axis=-1)
+
+    # ------------------------------------------------------------------
+    # Batch reduction
+    # ------------------------------------------------------------------
+
+    def _reduce(self, x: mx.array) -> mx.array:
+        return mx.mean(x) if self.reduction == 'mean' else mx.sum(x)
+
+    # ------------------------------------------------------------------
+    # Forward
+    # ------------------------------------------------------------------
+
+    def forward_dict(self, pred: mx.array, target: mx.array) -> Dict[str, mx.array]:
+        """Full forward pass returning all loss components.
+
+        Parameters
+        ----------
+        pred, target : mx.array, shape (B, C, X, Y, Z, T)
+
+        Returns
+        -------
+        dict with keys 'total', 'l2', 'grad', 'h1'
+        """
+        assert pred.shape == target.shape, \
+            f"Shape mismatch: pred {pred.shape} vs target {target.shape}"
+        assert pred.ndim == 6, \
+            f"Expected (B, C, X, Y, Z, T), got ndim={pred.ndim}"
+
+        T    = pred.shape[-1]
+        w    = self._weights(T)
+        diff = pred - target
+
+        acc_l2   = mx.array(0.0)
+        acc_grad = mx.array(0.0)
+
+        for t in range(T):
+            d_t = diff[..., t]
+            y_t = target[..., t]
+            if self.alpha != 0.0:
+                acc_l2   = acc_l2   + w[t] * self._reduce(self._l2_slice(d_t, y_t))
+            if self.beta != 0.0:
+                acc_grad = acc_grad + w[t] * self._reduce(self._grad_slice(d_t, y_t))
+
+        return {
+            'total': self.alpha * acc_l2 + self.beta * acc_grad,
+            'l2':    acc_l2,
+            'grad':  acc_grad,
+            'h1':    acc_l2 + acc_grad,
+        }
+
+    def __call__(self, pred: mx.array, target: mx.array) -> mx.array:
+        return self.forward_dict(pred, target)['total']
+
+    def as_eval_dict(self) -> Dict[str, object]:
+        """Per-component callables for logging 'l2', 'grad', 'h1' per epoch."""
+        return {
+            k: (lambda key: lambda p, y: self.forward_dict(p, y)[key])(k)
+            for k in ('l2', 'grad', 'h1')
+        }
+
+    def __repr__(self) -> str:
+        return (
+            f"CombinedTemporalLoss("
+            f"preset='{self.preset}', "
+            f"α={self.alpha}, β={self.beta}, "
+            f"l2_mode='{self.l2_mode}', "
+            f"grad_mode='{self.grad_mode}')"
+        )
