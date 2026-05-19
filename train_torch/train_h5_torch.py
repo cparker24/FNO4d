@@ -380,6 +380,12 @@ if save_last:
 
 log_peak_memory(log, cuda=True)
 
+# Shut down DataLoader workers explicitly so interpreter exit is immediate.
+log('Shutting down DataLoader workers ...')
+del train_loader
+test_loaders.clear()
+gc.collect()
+
 _title_parts = ['FNO Training (HDF5)']
 if lazy:
     _title_parts.append('lazy')
