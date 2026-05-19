@@ -107,6 +107,7 @@ class Trainer:
         eval_modes=None,
         save_every: int = None,
         save_best: int = None,
+        min_save_epoch: int = 0,
         save_dir: Union[str, Path] = "./ckpt",
         resume_from_dir: Union[str, Path] = None,
         max_autoregressive_steps: int = None,
@@ -144,6 +145,9 @@ class Trainer:
             if provided, key of metric f"{loader_name}_{loss_name}"
             to monitor and save model with best eval result
             Overrides save_every and saves on eval_interval
+        min_save_epoch: int, optional, default is 0
+            if provided, best-model saving (and best_metric_value tracking)
+            is suppressed before this epoch, so early unstable minima are ignored
         save_dir: str | Path, default "./ckpt"
             directory at which to save training states if
             save_every and/or save_best is provided
@@ -252,7 +256,7 @@ class Trainer:
                 epoch_metrics.update(**eval_metrics)
                 # save checkpoint if conditions are met
                 if save_best is not None:
-                    if eval_metrics[save_best] < best_metric_value:
+                    if epoch >= min_save_epoch and eval_metrics[save_best] < best_metric_value:
                         best_metric_value = eval_metrics[save_best]
                         self.checkpoint(save_dir)
 

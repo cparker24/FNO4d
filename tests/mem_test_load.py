@@ -73,7 +73,7 @@ sys.path.insert(0, '../loc_libs')
 from read_3d_root import read_3d_data
 from memory_utils import calculate_model_memory, reset_peak_memory, log_peak_memory
 from training_utils import (RunLog, patch_trainer_logging, patch_trainer_checkpoint,
-                             patch_trainer_min_save_epoch, save_last_checkpoint)
+                             save_last_checkpoint)
 from parse_training_log import TrainingHistory
 from norm_utils import build_normalizer
 

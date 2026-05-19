@@ -49,6 +49,7 @@ Two parallel training stacks are provided:
 - [Porting status (PyTorch → MLX)](#porting-status-pytorch--mlx)
 - [Repository layout](#repository-layout)
 - [Credits and Attribution](#credits-and-attribution)
+  - [Fork modifications to neuraloperator](#fork-modifications-to-neuraloperator)
 
 ---
 
@@ -731,12 +732,13 @@ python -m pytest tests/ -v
 
 The PyTorch FNO implementation in [neuraloperator-4d-2.0.0/](neuraloperator-4d-2.0.0/) is a
 **minimal fork** of the upstream [neuraloperator](https://github.com/neuraloperator/neuraloperator)
-library by Kossaifi, Kovachki, Li, et al.  Only the **differentiation and loss subsystems** were
-extended to support **four-dimensional fields** (x, y, z, t); all other code is unchanged from the
-original.  The specific modifications are documented in:
+library by Kossaifi, Kovachki, Li, et al.  The specific modifications are documented in:
 
 - [neuraloperator-4d-2.0.0/doc4dImp/Fno4dPlan.md](neuraloperator-4d-2.0.0/doc4dImp/Fno4dPlan.md) — implementation plan
 - [neuraloperator-4d-2.0.0/doc4dImp/Fno4dImplementation.md](neuraloperator-4d-2.0.0/doc4dImp/Fno4dImplementation.md) — detailed record of every change made
+
+See also [Fork modifications to neuraloperator](#fork-modifications-to-neuraloperator) for a
+log of all changes made to this fork, including post-initial modifications.
 
 For full documentation, tutorials, and the upstream API reference see the
 [neuraloperator documentation site](https://neuraloperator.github.io/dev/index.html).
@@ -781,6 +783,71 @@ If you use the PyTorch FNO in your work, please cite the upstream library papers
   year      = {2023},
 }
 ```
+
+### Fork modifications to neuraloperator
+
+All changes to the local fork are listed here in addition to the `doc4dImp/`
+documents, so that deviations from upstream are visible in one place.
+
+#### 1. Four-dimensional differentiation and loss (initial fork)
+
+The `FiniteDiff` class and the `H1Loss` / `LpLoss` losses were extended from
+2D/3D to 4D (x, y, η, τ) to support the heavy-ion collision field data.
+Details: [Fno4dImplementation.md](neuraloperator-4d-2.0.0/doc4dImp/Fno4dImplementation.md).
+
+#### 2. `min_save_epoch` — native parameter on `Trainer.train()`
+
+**File:** `neuraloperator-4d-2.0.0/neuralop/training/trainer.py`
+
+**Problem.** A monkey-patch in `loc_libs/training_utils.py`
+(`patch_trainer_min_save_epoch`) guarded the `trainer.checkpoint()` call
+before epoch `min_save_epoch`.  However, `best_metric_value` is a local
+variable inside `Trainer.train()` that was updated from epoch 0 regardless.
+This meant an early unstable minimum could be recorded, making the first
+eligible save after the guard lifted impossible to trigger — the guard blocked
+the write but not the tracker update.
+
+**Fix.** `min_save_epoch` is now a first-class parameter of `Trainer.train()`
+(default `0`, no restriction).  Both the tracker update and the checkpoint
+write are gated by a single condition:
+
+```python
+# Before (upstream behaviour)
+if eval_metrics[save_best] < best_metric_value:
+    best_metric_value = eval_metrics[save_best]
+    self.checkpoint(save_dir)
+
+# After (this fork)
+if epoch >= min_save_epoch and eval_metrics[save_best] < best_metric_value:
+    best_metric_value = eval_metrics[save_best]
+    self.checkpoint(save_dir)
+```
+
+`train()` signature change:
+
+```python
+# Before
+def train(self, ..., save_best: int = None,
+          save_dir: Union[str, Path] = "./ckpt", ...):
+
+# After
+def train(self, ..., save_best: int = None, min_save_epoch: int = 0,
+          save_dir: Union[str, Path] = "./ckpt", ...):
+```
+
+`patch_trainer_min_save_epoch` has been removed from `loc_libs/training_utils.py`
+entirely.  All training scripts pass the value directly:
+
+```python
+trainer.train(...,
+              save_best=save_best_key,
+              min_save_epoch=min_save_epoch or 0,
+              ...)
+```
+
+Config key (`min_save_epoch` in YAML) is unchanged.
+
+---
 
 ### `neuralop_mlx` — MLX port (experimental)
 

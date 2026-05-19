@@ -62,6 +62,7 @@ class Trainer:
         eval_losses: Dict = None,
         save_dir: Union[str, Path] = "./ckpt",
         save_best: Optional[str] = None,
+        min_save_epoch: int = 0,
         **kwargs,
     ):
         from neuralop_mlx.training.losses import LpLoss
@@ -106,7 +107,7 @@ class Trainer:
                             if save_best in k:
                                 metric_val = v
                                 break
-                    if metric_val is not None and metric_val < best_metric:
+                    if metric_val is not None and epoch >= min_save_epoch and metric_val < best_metric:
                         best_metric = metric_val
                         self.checkpoint(save_dir, name="best_model")
                         if self.verbose:

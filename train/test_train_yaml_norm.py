@@ -36,7 +36,7 @@ sys.path.insert(0, '../loc_libs')
 from read_3d_root import read_3d_data
 from fluid_datasets import FluidDataset
 from memory_utils import calculate_model_memory, reset_peak_memory, log_peak_memory
-from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint, patch_trainer_min_save_epoch, save_last_checkpoint
+from training_utils import RunLog, patch_trainer_logging, patch_trainer_checkpoint, save_last_checkpoint
 from parse_training_log import TrainingHistory
 from norm_utils import build_normalizer
 
@@ -240,8 +240,6 @@ patch_trainer_logging(trainer, log, history=history)
 if checkpoint_freq is not None and checkpoint_freq > 0:
     patch_trainer_checkpoint(trainer, Trainer, checkpoint_freq, model_dir)
 
-if min_save_epoch is not None and min_save_epoch > 0:
-    patch_trainer_min_save_epoch(trainer, Trainer, min_save_epoch)
 
 save_best_key = f'{test_resolutions[0]}_l2'
 
@@ -256,6 +254,7 @@ trainer.train(train_loader=train_loader,
               regularizer=False,
               save_dir=model_dir,
               save_best=save_best_key,
+              min_save_epoch=min_save_epoch or 0,
               training_loss=train_loss,
               eval_losses=eval_losses)
 

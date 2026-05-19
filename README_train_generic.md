@@ -1,5 +1,84 @@
 # train_generic — Unified FNO Training Script
 
+## Change log
+
+### `min_save_epoch` — moved from monkey-patch to native trainer parameter
+
+**Problem (bug).**  The previous implementation used a monkey-patch
+(`patch_trainer_min_save_epoch` in `loc_libs/training_utils.py`) that blocked
+the `trainer.checkpoint()` call before epoch `min_save_epoch`.  However, the
+`best_metric_value` tracker inside `trainer.train()` was a plain local variable
+that was updated from epoch 0 regardless.  This meant the running best could be
+set to a low value during the early unstable epochs, so once the guard lifted
+the very first eligible save might never trigger (nothing ever beat the
+already-recorded early minimum).
+
+**Fix.**  `min_save_epoch` is now a first-class parameter of
+`neuralop/training/trainer.py` `Trainer.train()`.  The condition that updates
+`best_metric_value` **and** calls `checkpoint()` is gated together:
+
+```python
+# neuraloperator-4d-2.0.0/neuralop/training/trainer.py  (train method)
+
+# Before
+if eval_metrics[save_best] < best_metric_value:
+    best_metric_value = eval_metrics[save_best]
+    self.checkpoint(save_dir)
+
+# After
+if epoch >= min_save_epoch and eval_metrics[save_best] < best_metric_value:
+    best_metric_value = eval_metrics[save_best]
+    self.checkpoint(save_dir)
+```
+
+The new `min_save_epoch` parameter (default `0`, meaning no restriction) was
+added to `Trainer.train()`:
+
+```python
+# neuraloperator-4d-2.0.0/neuralop/training/trainer.py  (train signature)
+
+# Before
+def train(self, ..., save_best: int = None, save_dir: Union[str, Path] = "./ckpt", ...):
+
+# After
+def train(self, ..., save_best: int = None, min_save_epoch: int = 0,
+          save_dir: Union[str, Path] = "./ckpt", ...):
+```
+
+**All training scripts** now pass the config value directly to `trainer.train()`:
+
+```python
+# All training scripts (train_h5.py, train.py, resume_train_h5.py,
+#   train_torch/*, train_gcs/*, train/*)
+
+# Before — monkey-patch applied before trainer.train()
+if min_save_epoch is not None and min_save_epoch > 0:
+    patch_trainer_min_save_epoch(trainer, Trainer, min_save_epoch)
+
+trainer.train(...,
+              save_best=save_best_key,
+              ...)
+
+# After — passed directly; or 0 converts None (key absent from config) to the default
+trainer.train(...,
+              save_best=save_best_key,
+              min_save_epoch=min_save_epoch or 0,
+              ...)
+```
+
+**`patch_trainer_min_save_epoch` has been removed** from
+`loc_libs/training_utils.py` entirely.  There is no longer any risk of two
+independent guards with different thresholds being active at the same time.
+
+**Config usage is unchanged** — set `min_save_epoch` in your YAML as before:
+
+```yaml
+min_save_epoch: 50   # do not save best model before epoch 50
+```
+
+Omitting the key (or setting it to `null`) is equivalent to `0` — best-model
+saving is active from the first evaluation epoch.
+
 Three training scripts cover all supported input formats:
 
 | Script | Purpose | Input format | Config |
