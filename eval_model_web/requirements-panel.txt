@@ -1,0 +1,9 @@
+# ── eval_model_web Panel dependencies ────────────────────────────────────────
+# Install with:  bash install.sh
+# or manually:   pip install -r requirements-panel.txt
+#
+# Everything else (numpy, matplotlib, torch/mlx, yaml, gcsfs, …) is already
+# covered by the top-level requirements-base.txt / requirements-mac.txt and
+# requirements-gcs.txt.  Only the Panel stack is new.
+
+panel>=1.4          # web app framework (pulls in bokeh, param, pyviz_comms)
