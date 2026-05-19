@@ -6,25 +6,43 @@ Normalisation helpers for 3-D hydro arrays with shape
 where feature 0 = energy density (ed) and features 1+ = vx, vy, vz
 (passed through unchanged by every function here).
 
-Three normalisation families:
+Four normalisation families:
 
-  etau75_3d        — ed → ed^0.75 * τ
-                     (tau only; identical to NormFn.etau75_3d)
+  etau75_3d             — ed → ed^0.75 * τ
+                          (tau only; no η correction)
+                          Helper: —
 
-  etau75_eta_3d    — ed → (ed^0.75 * τ) / ref[ieta, itau]
-                     (tau + data-driven per-(η,τ)-bin rescaling)
-                     Helper: compute_ref_etau75_eta  — build ref from training data
+  etau75_eta_3d         — ed → (ed^0.75 * τ) / ref[ieta, itau]
+                          (tau + data-driven per-(η,τ)-bin absolute rescaling)
+                          Helper: compute_ref_etau75_eta  — build ref from training data
 
-  cosh_etau75_3d   — ed → (ed · cosh(η)^α)^0.75 · τ
-                     (tau + analytic cosh(η) correction, no training data needed)
+  cosh_etau75_3d        — ed → (ed · cosh(η)^α)^0.75 · τ
+                          (tau + analytic cosh(η) correction, no training data needed)
+                          Helper: —
+
+  etau75_eta_shape_3d   — ed → (ed^0.75 * τ) / shape_ref[ieta, itau]
+                          (tau + shape-only η correction; shape_ref ∈ (0,1] so the
+                          Bjorken tau evolution is preserved at the peak η bin while
+                          the relative η dynamic range is equalised across bins)
+                          Helper: compute_ref_etau75_eta_shape  — build shape_ref from training data
 
 All families supply a matching inverse (inv_*).
 
+Choosing a family
+-----------------
+  • etau75_3d              — simplest baseline; η variation fully visible to the network.
+  • etau75_eta_3d          — full absolute rescaling; every (η,τ) cell arrives O(1),
+                             but the Bjorken tau evolution is absorbed into the normalisation.
+  • cosh_etau75_3d         — analytic η correction; needs no training data, assumes a
+                             cosh(η) longitudinal profile.
+  • etau75_eta_shape_3d    — shape-only η correction; the network still sees the Bjorken
+                             tau evolution while the η dynamic range is equalised.
+
 Broadcasting convention
 -----------------------
-tau  is reshaped to (1, 1, 1, 1, nT)   so it broadcasts against data[:, 0]
-eta  is reshaped to (1, 1, 1, n_eta, 1) so it broadcasts against data[:, 0]
-ref  is indexed as ref[np.newaxis, np.newaxis, np.newaxis, :, :] = (1,1,1,neta,ntau)
+tau       is reshaped to (1, 1, 1, 1, nT)    so it broadcasts against data[:, 0]
+eta       is reshaped to (1, 1, 1, n_eta, 1) so it broadcasts against data[:, 0]
+ref / shape_ref  are indexed as [..., np.newaxis, np.newaxis, np.newaxis, :, :] = (1,1,1,neta,ntau)
 """
 
 import numpy as np
