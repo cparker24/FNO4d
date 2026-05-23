@@ -43,6 +43,7 @@ Two parallel training stacks are provided:
   - [Documentation](#documentation)
 - [Packages](#packages)
   - [`neuralop_mlx` — MLX FNO (Apple Silicon)](#neuralop_mlx--mlx-fno-apple-silicon)
+  - [`neuralop_mlx_cpp` — C++ inference library (Apple Silicon)](#neuralop_mlx_cpp--c-inference-library-apple-silicon)
   - [`neuralop` — PyTorch neuraloperator (local 4D fork)](#neuralop--pytorch-neuraloperator-local-4d-fork)
   - [`loc_libs` — data I/O helpers](#loc_libs--data-io-helpers)
 - [Tests](#tests)
@@ -664,7 +665,60 @@ loss_fn = H1Loss(d=4)                # Sobolev H1 loss
 optimizer = AdamW(model.parameters(), lr=8e-3, weight_decay=1e-4)
 ```
 
-### `neuralop` — PyTorch neuraloperator (local 4D fork)
+### `neuralop_mlx_cpp` — C++ inference library (Apple Silicon)
+
+A self-contained C++ / Metal inference library that runs trained FNO models
+directly — no Python or MLX Python package required at inference time.
+Weights are loaded from the `.safetensors` file produced during training;
+the model architecture is read from the training YAML or from an exported JSON.
+
+> **Weight conversion prerequisite:** The `.safetensors` file is produced by the
+> `neuralop_mlx_cpp/tools/export_weights.py` script, which requires the Python
+> `neuralop_mlx` package (and hence MLX) to load and re-save the PyTorch checkpoint.
+> This one-time conversion step is run on the same Mac used for training:
+> ```bash
+> python neuralop_mlx_cpp/tools/export_weights.py \
+>     train_generic/checkpoints/best_model.safetensors \
+>     train_generic/checkpoints/config.yaml \
+>     best_model_cpp.safetensors
+> ```
+> After that the resulting `.safetensors` file can be copied anywhere and used
+> with `fno_infer` without any Python dependency.
+
+**Source:** [neuralop_mlx_cpp/](neuralop_mlx_cpp/) — see [neuralop_mlx_cpp/README.md](neuralop_mlx_cpp/README.md) for full build and usage instructions.
+
+**Quick start:**
+
+```bash
+cd neuralop_mlx_cpp && mkdir -p build && cd build
+cmake -DMLX_DIR=$(python -c "
+import importlib.util, os
+sp = importlib.util.find_spec('mlx')
+print(os.path.join(list(sp.submodule_search_locations)[0],'share','cmake','MLX'))
+") ..
+make -j$(sysctl -n hw.ncpu)
+
+# Run inference (Metal kernel, default)
+./fno_infer ../../train_generic/checkpoints/best_model.safetensors \
+            ../../train_generic/checkpoints/config.yaml \
+            5 64 64 32 64
+
+# Force CPU matmul path (for benchmarking / no Metal toolchain)
+./fno_infer --cpu ../../train_generic/checkpoints/best_model.safetensors \
+            ../../train_generic/checkpoints/config.yaml \
+            5 64 64 32 64
+```
+
+**Key features:**
+- Reads weights from `.safetensors` exported by `tools/export_weights.py` (one-time Python step)
+- Accepts the training YAML as-is; unknown keys are silently ignored
+- Two spectral contraction back-ends: custom Metal kernel (default) or MLX matmul fallback (`--cpu`)
+- Runtime `--cpu` flag allows comparing both paths without recompiling
+- CMake auto-detects Metal toolchain availability; falls back to matmul path if absent
+
+> **Note:** The custom Metal kernel and the MLX matmul path both execute on the Apple GPU.
+> The speedup from the custom kernel is most visible at `hidden_channels ≥ 64`;
+> at `hidden_channels=16` both paths are memory-bandwidth bound and perform similarly.
 
 ```python
 from neuralop.models import FNO
