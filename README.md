@@ -57,6 +57,8 @@ Two parallel training stacks are provided:
 
 ## Installation
 
+Remark: With these scripts encountered some issues with torch-harmonics. So not installed for now. This means some models LocLo etc are not working. To be fixed! 
+
 ### Prerequisites
 
 - Python ≥ 3.9
