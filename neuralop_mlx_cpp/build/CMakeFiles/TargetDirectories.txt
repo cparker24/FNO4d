@@ -1,0 +1,4 @@
+/Users/du8478/FNO4d/neuralop_mlx_cpp/build/CMakeFiles/neuralop_mlx_cpp.dir
+/Users/du8478/FNO4d/neuralop_mlx_cpp/build/CMakeFiles/fno_infer.dir
+/Users/du8478/FNO4d/neuralop_mlx_cpp/build/CMakeFiles/edit_cache.dir
+/Users/du8478/FNO4d/neuralop_mlx_cpp/build/CMakeFiles/rebuild_cache.dir
