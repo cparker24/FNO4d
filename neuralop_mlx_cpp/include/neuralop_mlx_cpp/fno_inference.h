@@ -60,6 +60,15 @@ struct FNOConfig {
 
   // Deserialise from JSON (see tools/export_weights.py)
   static FNOConfig from_json(const std::string& path);
+
+  // Deserialise from a training YAML (e.g. config_test_train.yaml).
+  // FNO-specific fields not present in the YAML use the defaults above.
+  // Only 'n_modes' is required; 'hidden_channels' and any other recognised
+  // top-level keys are picked up automatically; unknown keys are ignored.
+  static FNOConfig from_yaml(const std::string& path);
+
+  // Convenience: dispatch on file extension (.json → from_json, else from_yaml)
+  static FNOConfig from_file(const std::string& path);
 };
 
 } // namespace neuralop

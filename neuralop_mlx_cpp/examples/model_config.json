@@ -1,0 +1,16 @@
+{
+  "n_modes": [32, 32, 16, 16],
+  "in_channels": 4,
+  "out_channels": 4,
+  "hidden_channels": 16,
+  "n_layers": 4,
+  "lifting_channel_ratio": 2.0,
+  "projection_channel_ratio": 2.0,
+  "positional_embedding": true,
+  "use_channel_mlp": true,
+  "channel_mlp_expansion": 0.5,
+  "fno_skip": "linear",
+  "channel_mlp_skip": "soft-gating",
+  "fft_norm": "forward",
+  "metallib_path": ""
+}

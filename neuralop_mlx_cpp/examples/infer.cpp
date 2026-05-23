@@ -1,10 +1,11 @@
 // examples/infer.cpp — minimal inference demo for neuralop_mlx_cpp
 //
 // Usage:
-//   ./fno_infer <weights.safetensors> <model_config.json> <B> <d0> [d1 d2 …]
+//   ./fno_infer <weights.safetensors> <config.(json|yaml)> <B> <d0> [d1 d2 …]
 //
-// Example:
+// Examples:
 //   ./fno_infer weights.safetensors model_config.json 1 50 50 50 10
+//   ./fno_infer weights.safetensors config_test_train.yaml 1 50 50 50 10
 
 #include <chrono>
 #include <cstdlib>
@@ -24,7 +25,7 @@ using namespace neuralop;
 int main(int argc, char* argv[]) {
   if (argc < 5) {
     std::cerr << "Usage: " << argv[0]
-              << " <weights.safetensors> <model_config.json>"
+              << " <weights.safetensors> <config.(json|yaml)>"
                  " <batch> <d0> [d1 d2 …]\n";
     return 1;
   }
@@ -41,10 +42,10 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  // ── Load config ───────────────────────────────────────────────────────────
+  // ── Load config (JSON or YAML, detected by extension) ────────────────────
   FNOConfig cfg;
   try {
-    cfg = FNOConfig::from_json(config_path);
+    cfg = FNOConfig::from_file(config_path);
   } catch (const std::exception& e) {
     std::cerr << "Failed to load config: " << e.what() << "\n";
     return 1;

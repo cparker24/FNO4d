@@ -47,13 +47,20 @@ where the standard PyTorch/MPS backend has a broken complex FFT.
 cd /path/to/FNO4d
 
 cmake \
-  -DMLX_DIR=$(python -c "import mlx; print(mlx.__file__.replace('__init__.py','share/cmake/MLX'))") \
+  -DMLX_DIR=$(python -c "import importlib.util, os; sp=importlib.util.find_spec('mlx'); print(os.path.join(list(sp.submodule_search_locations)[0],'share','cmake','MLX'))") \
   -DCMAKE_BUILD_TYPE=Release \
   -S neuralop_mlx_cpp \
   -B neuralop_mlx_cpp/build
 
 cmake --build neuralop_mlx_cpp/build --target fno_infer -j
 ```
+
+> **If the `python -c` snippet above fails** (e.g. `mlx.__file__` is `None`),
+> pass the path explicitly instead:
+> ```bash
+> -DMLX_DIR=/opt/homebrew/Caskroom/miniconda/base/envs/fno_env_mlx/lib/python3.13/site-packages/mlx/share/cmake/MLX
+> ```
+> Adjust the conda env name / Python version to match your installation.
 
 The first configure step will auto-download `nlohmann/json.hpp` into
 `neuralop_mlx_cpp/third_party/`.
