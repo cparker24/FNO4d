@@ -77,7 +77,7 @@ class SpectralContractPrim : public mx::Primitive {
     out.set_data(mx::allocator::malloc(out.nbytes()));
 
     const auto& s = stream();
-    auto& d = device(s.device);
+    auto& d = mlx::core::metal::device(s.device);
 
     const std::string& lib_path =
         metallib_path_.empty() ? NEURALOP_DEFAULT_METALLIB_PATH : metallib_path_;
@@ -116,6 +116,33 @@ class SpectralContractPrim : public mx::Primitive {
   std::string metallib_path_;
 };
 
+// ── CPU-matmul fallback (used when force_cpu flag is set) ────────────────────
+static bool s_force_cpu = false;
+
+void spectral_contract_force_cpu(bool force) { s_force_cpu = force; }
+
+static mx::array _bmm(const mx::array& a, const mx::array& b) {
+  // a: (B,Ci,Ps), b: (Ci,Co,Ps) → (B,Co,Ps)
+  auto aT = mx::transpose(a, {2, 0, 1});
+  auto bT = mx::transpose(b, {2, 0, 1});
+  return mx::transpose(mx::matmul(aT, bT), {1, 2, 0});
+}
+
+static mx::array _spectral_contract_cpu(const mx::array& x_ft,
+                                        const mx::array& wr,
+                                        const mx::array& wi,
+                                        int batch, int out_ch, int prod_s) {
+  auto xr = mx::real(x_ft);
+  auto xi = mx::imag(x_ft);
+  auto out_r = mx::subtract(_bmm(xr, wr), _bmm(xi, wi));
+  auto out_i = mx::add     (_bmm(xr, wi), _bmm(xi, wr));
+  auto stacked = mx::stack({out_r, out_i}, -1);
+  auto contig  = mx::contiguous(stacked);
+  auto flat    = mx::flatten(contig);
+  auto cx_flat = mx::view(flat, mx::complex64);
+  return mx::reshape(cx_flat, {batch, out_ch, prod_s});
+}
+
 // ── Public entry point ────────────────────────────────────────────────────
 
 mx::array spectral_contract(const mx::array& x_ft,
@@ -124,7 +151,10 @@ mx::array spectral_contract(const mx::array& x_ft,
                              int batch, int in_ch, int out_ch, int prod_s,
                              const std::string& metallib_path)
 {
-  auto stream = mx::default_stream(mx::gpu);
+  if (s_force_cpu)
+    return _spectral_contract_cpu(x_ft, wr, wi, batch, out_ch, prod_s);
+
+  auto stream = mx::default_stream(mx::Device(mx::Device::gpu));
   return mx::array(
       {batch, out_ch, prod_s},
       mx::complex64,

@@ -30,4 +30,8 @@ mx::array spectral_contract(const mx::array& x_ft,
                              int batch, int in_ch, int out_ch, int prod_s,
                              const std::string& metallib_path = "");
 
+// Force the CPU matmul path at runtime (useful for benchmarking).
+// This is a no-op when the library was compiled without Metal support.
+void spectral_contract_force_cpu(bool force);
+
 } // namespace neuralop

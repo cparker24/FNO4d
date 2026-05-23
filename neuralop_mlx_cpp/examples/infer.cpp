@@ -1,11 +1,14 @@
 // examples/infer.cpp — minimal inference demo for neuralop_mlx_cpp
 //
 // Usage:
-//   ./fno_infer <weights.safetensors> <config.(json|yaml)> <B> <d0> [d1 d2 …]
+//   ./fno_infer [--cpu] <weights.safetensors> <config.(json|yaml)> <B> <d0> [d1 d2 …]
+//
+// Flags:
+//   --cpu   Force CPU matmul path even in Metal builds (useful for benchmarking)
 //
 // Examples:
 //   ./fno_infer weights.safetensors model_config.json 1 50 50 50 10
-//   ./fno_infer weights.safetensors config_test_train.yaml 1 50 50 50 10
+//   ./fno_infer --cpu weights.safetensors config_test_train.yaml 1 50 50 50 10
 
 #include <chrono>
 #include <cstdlib>
@@ -18,24 +21,40 @@
 #include "neuralop_mlx_cpp/fno_inference.h"
 #include "../src/fno.h"
 #include "../src/weight_loader.h"
+#include "../src/spectral_contract.h"
 
 namespace mx = mlx::core;
 using namespace neuralop;
 
 int main(int argc, char* argv[]) {
-  if (argc < 5) {
+  // ── Parse flags ────────────────────────────────────────────────────────────
+  bool force_cpu = false;
+  std::vector<const char*> pos_args;
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--cpu") force_cpu = true;
+    else pos_args.push_back(argv[i]);
+  }
+
+  if (pos_args.size() < 4) {
     std::cerr << "Usage: " << argv[0]
-              << " <weights.safetensors> <config.(json|yaml)>"
+              << " [--cpu] <weights.safetensors> <config.(json|yaml)>"
                  " <batch> <d0> [d1 d2 …]\n";
     return 1;
   }
 
-  const std::string weights_path = argv[1];
-  const std::string config_path  = argv[2];
-  const int         batch        = std::atoi(argv[3]);
+  if (force_cpu) {
+    neuralop::spectral_contract_force_cpu(true);
+    std::cout << "[Mode] CPU matmul (--cpu flag set)\n";
+  } else {
+    std::cout << "[Mode] Metal kernel (default)\n";
+  }
+
+  const std::string weights_path = pos_args[0];
+  const std::string config_path  = pos_args[1];
+  const int         batch        = std::atoi(pos_args[2]);
 
   std::vector<int> spatial;
-  for (int i = 4; i < argc; ++i) spatial.push_back(std::atoi(argv[i]));
+  for (size_t i = 3; i < pos_args.size(); ++i) spatial.push_back(std::atoi(pos_args[i]));
 
   if (spatial.empty()) {
     std::cerr << "Error: provide at least one spatial dimension\n";
@@ -58,10 +77,26 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  std::cout << "Model: in_ch=" << cfg.in_channels
-            << "  out_ch=" << cfg.out_channels
-            << "  hidden=" << cfg.hidden_channels
-            << "  layers=" << cfg.n_layers << "\n";
+  // ── Print config ─────────────────────────────────────────────────────────
+  std::cout << "Config (" << config_path << "):\n";
+  std::cout << "  in_channels              = " << cfg.in_channels << "\n";
+  std::cout << "  out_channels             = " << cfg.out_channels << "\n";
+  std::cout << "  hidden_channels          = " << cfg.hidden_channels << "\n";
+  std::cout << "  n_layers                 = " << cfg.n_layers << "\n";
+  std::cout << "  n_modes                  = [";
+  for (size_t i = 0; i < cfg.n_modes.size(); ++i)
+    std::cout << (i ? ", " : "") << cfg.n_modes[i];
+  std::cout << "]\n";
+  std::cout << "  lifting_channel_ratio    = " << cfg.lifting_channel_ratio << "\n";
+  std::cout << "  projection_channel_ratio = " << cfg.projection_channel_ratio << "\n";
+  std::cout << "  positional_embedding     = " << (cfg.positional_embedding ? "true" : "false") << "\n";
+  std::cout << "  use_channel_mlp          = " << (cfg.use_channel_mlp ? "true" : "false") << "\n";
+  std::cout << "  channel_mlp_expansion    = " << cfg.channel_mlp_expansion << "\n";
+  std::cout << "  fno_skip                 = " << cfg.fno_skip << "\n";
+  std::cout << "  channel_mlp_skip         = " << cfg.channel_mlp_skip << "\n";
+  std::cout << "  fft_norm                 = " << cfg.fft_norm << "\n";
+  if (!cfg.metallib_path.empty())
+    std::cout << "  metallib_path            = " << cfg.metallib_path << "\n";
 
   // ── Build model ───────────────────────────────────────────────────────────
   FNO model(cfg.in_channels, cfg.out_channels, cfg.hidden_channels,

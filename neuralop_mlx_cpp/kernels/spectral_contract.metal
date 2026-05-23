@@ -14,8 +14,21 @@
 //   then each independently reads weights for its own e.
 
 #include <metal_stdlib>
-#include "mlx/backend/metal/kernels/complex.h"
-#include "mlx/backend/metal/kernels/defines.h"
+// Avoid pulling in MLX headers: the MLX complex.h references bfloat16_t which
+// may not exist in older Metal toolchains.  We only need complex64_t and the
+// instantiate_kernel macro — define them here directly.
+
+struct complex64_t {
+    float real;
+    float imag;
+    complex64_t() = default;
+    complex64_t(float r, float i) : real(r), imag(i) {}
+};
+
+// Equivalent to the macro in mlx/backend/metal/kernels/defines.h
+#define instantiate_kernel(name, func, ...)                              \
+    template [[host_name(name)]] [[kernel]]                              \
+    decltype(func<__VA_ARGS__>) func<__VA_ARGS__>;
 
 using namespace metal;
 

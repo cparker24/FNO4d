@@ -61,4 +61,7 @@ mx::array spectral_contract(const mx::array& x_ft,
   return mx::reshape(cx_flat, {batch, out_ch, prod_s});
 }
 
+// No-op: CPU build always uses the matmul path.
+void spectral_contract_force_cpu(bool) {}
+
 } // namespace neuralop
