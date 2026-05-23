@@ -15,7 +15,8 @@ Two parallel training stacks are provided:
 | Stack | Package | GPU backend | Target |
 |---|---|---|---|
 | PyTorch | `neuralop` (local fork) | CUDA (Linux) / CPU (Mac) | Lambda GPU instances, HPC |
-| MLX | `neuralop_mlx` (experimental)| Metal (Apple Silicon) | Mac M-series |
+| MLX | `neuralop_mlx` (inference tested wrt PyTorch, training to be tested)| Metal (Apple Silicon) | Mac M-series |
+| C++ / Metal | `neuralop_mlx_cpp` (experimental no physics test yet) | Metal (Apple Silicon) | Mac M-series — Python-free inference |
 
 ---
 
