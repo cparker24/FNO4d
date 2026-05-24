@@ -124,6 +124,7 @@ num_workers     = cfg.get('num_workers', 0)
 eval_interval   = cfg.get('eval_interval', 2)
 save_last       = cfg.get('save_last', True)
 norm_cfg        = cfg.get('normalization', {'name': 'none'})
+norm_chunk_size = cfg.get('norm_chunk_size', 64)
 
 # ---------------------------------------------------------------------------
 # output dirs + logging
@@ -249,8 +250,8 @@ if lazy:
     # no fitting and skip this block.
     _needs_fit = normalizer.name in ('etau75_eta_3d', 'etau75_eta_shape_3d')
     if _needs_fit:
-        log('[norm] data-driven normalizer: materialising training split for ref ...')
-        normalizer.fit_transform(arr[0:n_train][:, :, xyslice, xyslice, etaslice, tauslice])   # populates normalizer.ref; result discarded
+        log(f'[norm] data-driven normalizer: computing ref in chunks of {norm_chunk_size} events ...')
+        normalizer.fit_lazy(arr, n_train, xyslice, etaslice, tauslice, chunk_size=norm_chunk_size)
         gc.collect()
         log(f'[norm] ref computed  shape={normalizer.ref.shape}')
 

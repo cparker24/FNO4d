@@ -66,14 +66,16 @@ lazy: true
 # --- normalisation ---------------------------------------------------------
 # In lazy mode: analytic normalizers (none, etau75_3d, cosh_etau75_3d) are
 #   applied per-event inside __getitem__ with zero up-front cost.
-#   Data-driven normalizers (etau75_eta_3d, etau75_eta_shape_3d) materialise
-#   the training split once to compute their reference, then apply per-event.
+#   Data-driven normalizers (etau75_eta_3d, etau75_eta_shape_3d) compute their
+#   reference by streaming through the training split in chunks of norm_chunk_size
+#   events — peak RAM stays bounded to one chunk rather than the full split.
 # In eager mode: normalizer is applied to the full materialised arrays before
 #   the training loop, same as the ROOT-based train.py.
 normalization:
   name: none              # none | etau75_3d | etau75_eta_3d |
                           # etau75_eta_shape_3d | cosh_etau75_3d
   # alpha: 1.0            # only used by cosh_etau75_3d
+norm_chunk_size: 64       # [lazy, data-driven] events per chunk when computing ref
 
 # --- data preparation ------------------------------------------------------
 train_ratio: 0.8

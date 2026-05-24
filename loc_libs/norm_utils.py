@@ -67,6 +67,43 @@ class Normalizer:
     # forward passes
     # ------------------------------------------------------------------
 
+    def fit_lazy(self, arr, n_train: int,
+                 xyslice, etaslice, tauslice,
+                 chunk_size: int = 64,
+                 eps: float = 1e-6) -> None:
+        """Compute self.ref from a lazy array in chunks without materialising all events.
+
+        Reads `chunk_size` events at a time via arr[start:stop], applies the
+        spatial slices, and accumulates the per-(eta, tau) running mean of the
+        spatial maximum of ed^0.75*tau.  Peak RAM is bounded to one chunk rather
+        than the full training split.
+
+        Only sets self.ref — does not return a normalised array.
+        No-op for analytic normalizers that carry no ref.
+        """
+        if self.name not in ('etau75_eta_3d', 'etau75_eta_shape_3d'):
+            return
+
+        acc   = None
+        total = 0
+        for start in range(0, n_train, chunk_size):
+            stop  = min(start + chunk_size, n_train)
+            chunk = arr[start:stop][:, :, xyslice, xyslice, etaslice, tauslice]
+            # chunk: (chunk_n, nF, nx', ny', neta', ntau')
+            nT  = chunk.shape[-1]
+            tau = (np.arange(nT) * self.dtau + self.tau_min).reshape(1, 1, 1, 1, nT)
+            ed_scaled  = chunk[:, 0] ** 0.75 * tau       # (chunk_n, nx', ny', neta', ntau')
+            chunk_sum  = ed_scaled.max(axis=(1, 2)).sum(axis=0)  # (neta', ntau')
+            acc    = chunk_sum if acc is None else acc + chunk_sum
+            total += stop - start
+
+        raw_ref = np.maximum(acc / total, eps)
+        if self.name == 'etau75_eta_3d':
+            self.ref = raw_ref
+        else:  # etau75_eta_shape_3d
+            ref_peak = raw_ref.max(axis=0, keepdims=True)          # (1, ntau')
+            self.ref = np.maximum(raw_ref / np.maximum(ref_peak, eps), eps)
+
     def fit_transform(self, data: np.ndarray) -> np.ndarray:
         """Normalise *training* data.  Computes and stores ref for data-driven norms."""
         if self.name == 'none':

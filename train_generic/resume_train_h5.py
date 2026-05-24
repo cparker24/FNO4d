@@ -195,6 +195,7 @@ num_workers       = cfg.get('num_workers', 0)
 eval_interval     = cfg.get('eval_interval', 2)
 save_last         = cfg.get('save_last', True)
 norm_cfg          = cfg.get('normalization', {'name': 'none'})
+norm_chunk_size   = cfg.get('norm_chunk_size', 64)
 
 # resume_model_dir defaults to model_dir when not specified
 _resume_model_dir_raw = cfg.get('resume_model_dir', model_dir)
@@ -405,8 +406,8 @@ if lazy:
     # Data-driven normalizers: only re-fit if the ref was not loaded from disk.
     _needs_fit = normalizer.name in ('etau75_eta_3d', 'etau75_eta_shape_3d')
     if _needs_fit and normalizer.ref is None:
-        log('[norm] data-driven normalizer: materialising training split for ref ...')
-        normalizer.fit_transform(arr[0:n_train][:, :, xyslice, xyslice, etaslice, tauslice])
+        log(f'[norm] data-driven normalizer: computing ref in chunks of {norm_chunk_size} events ...')
+        normalizer.fit_lazy(arr, n_train, xyslice, etaslice, tauslice, chunk_size=norm_chunk_size)
         gc.collect()
         log(f'[norm] ref computed  shape={normalizer.ref.shape}')
 
