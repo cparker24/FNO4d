@@ -45,7 +45,7 @@ This makes `import neuralop_mlx` available anywhere in the environment.
 
 ```bash
 python -m pytest tests/ -v
-# Expected: 48 passed
+# Expected: 57 passed
 ```
 
 ---
@@ -131,6 +131,7 @@ The function handles all layout differences automatically:
 | PyTorch parameter | MLX parameter | Transform applied |
 |---|---|---|
 | `convs[i].weight.tensor` (complex64) | `convs[i].weight_r` + `weight_i` (float32) | split real/imag |
+| `convs[i].weight.core` + `weight.factors.factor_N` (Tucker/TFNO) | `convs[i].weight_r` + `weight_i` (float32) | `tl.tucker_to_tensor` then split real/imag |
 | `convs[i].bias` shape `(C,1,…,1)` | `convs[i].bias` shape `(1,C,1,…,1)` | reshape |
 | `fno_skips[i].conv.weight` shape `(out,in,1)` | `fno_skips[i].linear.weight` shape `(out,in)` | squeeze last dim |
 | `channel_mlp[i].fcs[j].weight` shape `(out,in,1)` | `channel_mlps[i].fcs[j].weight` shape `(out,in)` | squeeze last dim |
@@ -241,7 +242,7 @@ original default values, i.e. dense weights):
 
 | Argument | PyTorch default | Status in MLX |
 |----------|----------------|---------------|
-| `factorization` | `None` | Not implemented; dense weights only |
+| `factorization` | `None` | Not a constructor arg in MLX; TFNO checkpoints load via `load_from_torch` (see Known gaps §1) |
 | `rank` | `1.0` | Not applicable |
 | `fixed_rank_modes` | `False` | Not applicable |
 | `max_n_modes` | `None` | Not implemented |
@@ -272,16 +273,69 @@ MLX version — the MLX constructor will raise `TypeError`.
 | Weight transfer from `.pth` checkpoint (bare and wrapped) | `test_weight_transfer.py` | Passing |
 | Weight values match per-layer after transfer | `test_weight_transfer.py` | Passing |
 | File/key error handling in `load_from_torch` | `test_weight_transfer.py` | Passing |
+| TFNO Tucker weights → MLX inference, 2D/3D/4D parity (max diff < 1e-3) | `test_weight_transfer.py` | Passing |
+| TFNO Tucker weights at very low rank (0.1) → MLX inference parity | `test_weight_transfer.py` | Passing |
+| TFNO Tucker weights → MLX gradient flow (no NaN) | `test_weight_transfer.py` | Passing |
+| TFNO Tucker checkpoint file round-trip | `test_weight_transfer.py` | Passing |
 
 ---
 
 ## Known gaps and open issues
 
-### 1. No TFNO / tensor-factorized weights
+### 1. TFNO inference is supported; TFNO training is not
 
-`factorization`, `rank`, and Tucker/CP/TT compressed weights are not
-implemented. Only dense weight storage (`weight_r` + `weight_i` float32) is
-supported. If you need a compressed model, use the original PyTorch version.
+MLX can load a pre-trained Tucker-factorized TFNO checkpoint and run inference
+with outputs numerically identical to the original model (max diff < 1e-3 over
+float32 FFT chains). What it cannot do is **train** with Tucker/CP/TT
+factorized weights, because no MLX equivalent of `tltorch.FactorizedTensor`
+exists.
+
+**Why PyTorch MPS cannot help here either:** PyTorch's MPS backend has no
+working `complex64` support — `torch.einsum` with complex tensors crashes at
+the Metal gather layer (PyTorch issues [#90019][mps-c64],
+[#119088][mps-c64-2], [#143140][mps-einsum]). Tucker contractions in
+`tltorch` go through `tl.einsum` on complex weights, so TFNO is also broken on
+MPS. MLX avoids this entirely by splitting weights into real/imaginary `float32`
+pairs at the storage level.
+
+**Loading a TFNO checkpoint for inference:**
+
+```python
+from neuralop_mlx import FNO, load_from_torch
+
+# Construct a standard dense MLX FNO with the same architecture as the TFNO
+mlx_model = FNO(
+    n_modes=[32, 32, 16, 16], in_channels=4, out_channels=4,
+    hidden_channels=64, n_layers=4, projection_channel_ratio=2,
+)
+
+# load_from_torch detects Tucker keys automatically and reconstructs
+# the dense weight via tl.tucker_to_tensor before assigning weight_r/weight_i
+load_from_torch("tfno_checkpoint.pth", mlx_model)
+
+# Inference output is numerically identical to the TFNO forward pass
+out = mlx_model(x)
+```
+
+`tensorly` must be installed (`pip install tensorly`) for the Tucker
+reconstruction. It is already present in any environment that has `tltorch`.
+
+**What is and isn't preserved after loading:**
+
+| Property | Preserved? |
+|----------|-----------|
+| Output values (forward-pass parity, max diff < 1e-3) | ✅ Yes |
+| Parameter count / memory footprint | ❌ No — MLX stores full dense weights |
+| Tucker structure for continued training | ❌ No — training updates dense weights |
+
+The compression benefit of Tucker factorization is realised during PyTorch
+training. Once loaded into MLX, the model runs at full (dense) memory
+footprint. For pure inference on Apple Silicon this is fine; for continued
+training with Tucker regularisation, the original PyTorch TFNO must be used.
+
+[mps-c64]: https://github.com/pytorch/pytorch/issues/90019
+[mps-c64-2]: https://github.com/pytorch/pytorch/issues/119088
+[mps-einsum]: https://github.com/pytorch/pytorch/issues/143140
 
 ### 2. LR scheduler is not called by the Trainer
 

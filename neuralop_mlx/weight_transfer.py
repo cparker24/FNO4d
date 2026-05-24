@@ -179,9 +179,14 @@ def _find_weight(state_dict: dict, candidates: list):
 def _get_complex_weight(state_dict: dict, prefix: str) -> np.ndarray:
     """Extract complex weight from a PyTorch SpectralConv layer.
 
-    Handles DenseTensor storage (.tensor suffix) and plain tensor weights.
+    Handles three storage formats:
+    - DenseTensor (.weight.tensor) — neuralop default when factorization=None
+    - Plain complex tensor (.weight)
+    - Tucker factorized tensor (.weight.core + .weight.factors.factor_N) — TFNO
     """
     import torch
+
+    # --- Dense / DenseTensor ---
     candidates = [
         f"{prefix}.weight.tensor",   # DenseTensor (neuralop default)
         f"{prefix}.weight",          # plain complex tensor
@@ -197,9 +202,50 @@ def _get_complex_weight(state_dict: dict, prefix: str) -> np.ndarray:
                 return arr[..., 0].astype(np.float32) + 1j * arr[..., 1].astype(np.float32)
             return t.numpy().astype(np.complex64)
 
+    # --- Tucker factorized (TFNO) ---
+    # Keys: {prefix}.weight.core  and  {prefix}.weight.factors.factor_0, factor_1, ...
+    core_key = f"{prefix}.weight.core"
+    if core_key in state_dict:
+        try:
+            import tensorly as tl
+        except ImportError as exc:
+            raise ImportError(
+                "tensorly is required to load Tucker-factorized TFNO weights. "
+                "Install it with: pip install tensorly"
+            ) from exc
+
+        # Convert to numpy before reconstruction. Use a temporary numpy backend
+        # to avoid interfering with any PyTorch-backed tensorly calls elsewhere
+        # (tl.set_backend is global; restore it after reconstruction).
+        core = state_dict[core_key].numpy()
+
+        factors = []
+        i = 0
+        while True:
+            fkey = f"{prefix}.weight.factors.factor_{i}"
+            if fkey not in state_dict:
+                break
+            factors.append(state_dict[fkey].numpy())
+            i += 1
+
+        if not factors:
+            raise KeyError(
+                f"Found Tucker core at '{core_key}' but no factor matrices. "
+                f"Available keys: {[k for k in state_dict if k.startswith(prefix)]}"
+            )
+
+        _prev_backend = tl.get_backend()
+        try:
+            tl.set_backend("numpy")
+            dense = tl.tucker_to_tensor((core, factors)).astype(np.complex64)
+        finally:
+            tl.set_backend(_prev_backend)
+
+        return dense
+
     raise KeyError(
         f"Cannot find spectral conv weight for prefix '{prefix}'. "
-        f"Tried: {candidates}. "
+        f"Tried dense keys {candidates} and Tucker key '{core_key}'. "
         f"Available keys with that prefix: {[k for k in state_dict if k.startswith(prefix)]}"
     )
 

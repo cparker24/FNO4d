@@ -239,6 +239,160 @@ class TestWeightValues:
 
 
 # ---------------------------------------------------------------------------
+# Tucker factorized weights (TFNO → MLX FNO)
+# ---------------------------------------------------------------------------
+
+requires_tensorly = pytest.mark.skipif(
+    not (TORCH_AVAILABLE and MLX_AVAILABLE and __import__("importlib").util.find_spec("tensorly") is not None),
+    reason="PyTorch, MLX, and tensorly must all be installed",
+)
+
+
+def _make_tfno(n_modes, n_layers=2, hidden=8, rank=0.5):
+    """Build a PyTorch TFNO with Tucker factorization."""
+    sys.path.insert(0, NEURALOP_PATH)
+    from neuralop.models import TFNO
+    m = TFNO(
+        n_modes=n_modes, in_channels=4, out_channels=4,
+        hidden_channels=hidden, n_layers=n_layers,
+        projection_channel_ratio=2,
+        factorization="Tucker", rank=rank,
+    )
+    m.eval()
+    return m
+
+
+@requires_both
+class TestTuckerWeightTransfer:
+    """Load Tucker-factorized TFNO weights into a dense MLX FNO."""
+
+    def _run_parity(self, n_modes, spatial, rank=0.5, seed=42):
+        """Core helper: transfer weights and compare forward outputs."""
+        from neuralop_mlx.weight_transfer import load_from_torch
+        np.random.seed(seed)
+        x_np = np.random.randn(1, 4, *spatial).astype(np.float32)
+
+        pt = _make_tfno(n_modes, rank=rank)
+        with __import__("torch").no_grad():
+            pt_out = pt(__import__("torch").tensor(x_np)).numpy()
+
+        mlx_m = _make_mlx(n_modes)
+        load_from_torch(pt, mlx_m)
+        mx.eval(mlx_m.parameters())
+
+        mlx_out = np.array(mlx_m(mx.array(x_np)))
+        mx.eval()
+        return pt_out, mlx_out
+
+    # --- shape / NaN ---
+
+    def test_load_does_not_raise(self):
+        """load_from_torch must complete without error on a TFNO checkpoint."""
+        from neuralop_mlx.weight_transfer import load_from_torch
+        pt = _make_tfno((4, 4, 3, 3))
+        mlx_m = _make_mlx((4, 4, 3, 3))
+        load_from_torch(pt, mlx_m)  # must not raise
+
+    def test_output_shape(self):
+        """Output shape must be unchanged after Tucker weight transfer."""
+        pt_out, mlx_out = self._run_parity((4, 4, 3, 3), (8, 8, 4, 4))
+        assert mlx_out.shape == pt_out.shape
+
+    def test_no_nan_in_output(self):
+        """No NaN values in MLX output after Tucker weight transfer."""
+        _, mlx_out = self._run_parity((4, 4, 3, 3), (8, 8, 4, 4))
+        assert not np.any(np.isnan(mlx_out)), "NaN detected in MLX output"
+
+    # --- numerical parity ---
+
+    def test_parity_2d(self):
+        """2D TFNO → MLX parity within 1e-3."""
+        pt_out, mlx_out = self._run_parity((4, 4), (16, 16))
+        diff = np.max(np.abs(pt_out - mlx_out))
+        assert diff < 1e-3, f"2D Tucker parity max_diff={diff:.2e}"
+
+    def test_parity_3d(self):
+        """3D TFNO → MLX parity within 1e-3."""
+        pt_out, mlx_out = self._run_parity((4, 4, 3), (8, 8, 4))
+        diff = np.max(np.abs(pt_out - mlx_out))
+        assert diff < 1e-3, f"3D Tucker parity max_diff={diff:.2e}"
+
+    def test_parity_4d(self):
+        """4D TFNO → MLX parity within 1e-3."""
+        pt_out, mlx_out = self._run_parity((4, 4, 3, 3), (8, 8, 4, 4))
+        diff = np.max(np.abs(pt_out - mlx_out))
+        assert diff < 1e-3, f"4D Tucker parity max_diff={diff:.2e}"
+
+    def test_parity_low_rank(self):
+        """Very low rank (0.1, ~10% params) still transfers correctly."""
+        pt_out, mlx_out = self._run_parity((4, 4, 3, 3), (8, 8, 4, 4), rank=0.1)
+        diff = np.max(np.abs(pt_out - mlx_out))
+        assert diff < 1e-3, f"low-rank Tucker parity max_diff={diff:.2e}"
+
+    # --- gradient flow ---
+
+    def test_gradient_flow_after_tucker_transfer(self):
+        """No NaN gradients after Tucker weight transfer and one training step."""
+        import mlx.nn as nn
+        from neuralop_mlx.weight_transfer import load_from_torch
+        np.random.seed(0)
+        x_np = np.random.randn(1, 4, 8, 8, 4, 4).astype(np.float32)
+        y_np = np.random.randn(1, 4, 8, 8, 4, 4).astype(np.float32)
+        x, y = mx.array(x_np), mx.array(y_np)
+
+        pt = _make_tfno((4, 4, 3, 3))
+        mlx_m = _make_mlx((4, 4, 3, 3))
+        load_from_torch(pt, mlx_m)
+
+        def fwd(model):
+            pred = model(x)
+            return mx.mean((pred - y) ** 2)
+
+        loss, grads = nn.value_and_grad(mlx_m, fwd)(mlx_m)
+        mx.eval(loss, grads)
+
+        assert not np.isnan(float(loss.item())), "NaN loss after Tucker transfer"
+
+        def _check_no_nan(tree, path=""):
+            if isinstance(tree, mx.array):
+                assert not mx.any(mx.isnan(tree)).item(), f"NaN gradient at {path}"
+            elif isinstance(tree, dict):
+                for k, v in tree.items():
+                    _check_no_nan(v, f"{path}.{k}")
+            elif isinstance(tree, list):
+                for i, v in enumerate(tree):
+                    _check_no_nan(v, f"{path}[{i}]")
+
+        _check_no_nan(grads)
+
+    # --- checkpoint round-trip ---
+
+    def test_checkpoint_file_tucker(self):
+        """Tucker weights survive save → load from file."""
+        import torch, tempfile, os
+        from neuralop_mlx.weight_transfer import load_from_torch
+        np.random.seed(5)
+        x_np = np.random.randn(1, 4, 8, 8, 4, 4).astype(np.float32)
+
+        pt = _make_tfno((4, 4, 3, 3))
+        with torch.no_grad():
+            pt_out = pt(torch.tensor(x_np)).numpy()
+
+        with tempfile.NamedTemporaryFile(suffix=".pth", delete=False) as f:
+            path = f.name
+        try:
+            torch.save(pt.state_dict(), path)
+            mlx_m = _make_mlx((4, 4, 3, 3))
+            load_from_torch(path, mlx_m)
+            mlx_out = np.array(mlx_m(mx.array(x_np)))
+            mx.eval()
+            diff = np.max(np.abs(pt_out - mlx_out))
+            assert diff < 1e-3, f"Tucker checkpoint file parity max_diff={diff:.2e}"
+        finally:
+            os.unlink(path)
+
+
+# ---------------------------------------------------------------------------
 # Error handling
 # ---------------------------------------------------------------------------
 
