@@ -67,6 +67,88 @@ class Normalizer:
     # forward passes
     # ------------------------------------------------------------------
 
+    def fit_lazy(self, arr, n_train: int,
+                 xyslice, etaslice, tauslice,
+                 chunk_size: int = 64,
+                 eps: float = 1e-6) -> None:
+        """Compute self.ref from a lazy array in chunks without materialising all events.
+
+        Reads `chunk_size` events at a time via arr[start:stop], applies the
+        spatial slices, and accumulates the per-(eta, tau) running mean of the
+        spatial maximum of ed^0.75*tau.  Peak RAM is bounded to one chunk rather
+        than the full training split.
+
+        Only sets self.ref — does not return a normalised array.
+        No-op for analytic normalizers that carry no ref.
+
+        # -----------------------------------------------------------------------
+        # FUTURE REFACTOR — if a new data-driven normalizer is added, the
+        # accumulation logic below and the dispatch in fit_transform will both
+        # need updating (DRY violation).  The fix is to replace the inline math
+        # with three private helpers shared by both methods:
+        #
+        #   def _ref_needs_fit(self) -> bool:
+        #       return self.name in ('etau75_eta_3d', 'etau75_eta_shape_3d', ...)
+        #
+        #   def _ref_accumulate(self, chunk: np.ndarray) -> np.ndarray:
+        #       # per-chunk contribution: (neta', ntau') sum
+        #       nT  = chunk.shape[-1]
+        #       tau = (np.arange(nT) * self.dtau + self.tau_min).reshape(1, 1, 1, 1, nT)
+        #       if self.name in ('etau75_eta_3d', 'etau75_eta_shape_3d'):
+        #           return (chunk[:, 0] ** 0.75 * tau).max(axis=(1, 2)).sum(axis=0)
+        #       # elif self.name == 'new_norm': ...
+        #
+        #   def _ref_finalize(self, raw_ref: np.ndarray, eps: float = 1e-6) -> None:
+        #       # convert raw mean → self.ref; one dispatch point for all variants
+        #       raw_ref = np.maximum(raw_ref, eps)
+        #       if self.name == 'etau75_eta_3d':
+        #           self.ref = raw_ref
+        #       elif self.name == 'etau75_eta_shape_3d':
+        #           ref_peak  = raw_ref.max(axis=0, keepdims=True)
+        #           self.ref  = np.maximum(raw_ref / np.maximum(ref_peak, eps), eps)
+        #       # elif self.name == 'new_norm': ...
+        #
+        # fit_lazy then becomes a generic loop:
+        #   acc, total = None, 0
+        #   for start in range(0, n_train, chunk_size):
+        #       stop  = min(start + chunk_size, n_train)
+        #       chunk = arr[start:stop][:, :, xyslice, xyslice, etaslice, tauslice]
+        #       contrib = self._ref_accumulate(chunk)
+        #       acc = contrib if acc is None else acc + contrib
+        #       total += stop - start
+        #   self._ref_finalize(acc / total)
+        #
+        # fit_transform calls the same helpers on the full batch as one chunk:
+        #   if self._ref_needs_fit():
+        #       self._ref_finalize(self._ref_accumulate(data) / len(data))
+        #
+        # Adding a new data-driven normalizer then only touches _ref_needs_fit,
+        # _ref_accumulate, _ref_finalize — fit_lazy and fit_transform are unchanged.
+        # -----------------------------------------------------------------------
+        """
+        if self.name not in ('etau75_eta_3d', 'etau75_eta_shape_3d'):
+            return
+
+        acc   = None
+        total = 0
+        for start in range(0, n_train, chunk_size):
+            stop  = min(start + chunk_size, n_train)
+            chunk = arr[start:stop][:, :, xyslice, xyslice, etaslice, tauslice]
+            # chunk: (chunk_n, nF, nx', ny', neta', ntau')
+            nT  = chunk.shape[-1]
+            tau = (np.arange(nT) * self.dtau + self.tau_min).reshape(1, 1, 1, 1, nT)
+            ed_scaled  = chunk[:, 0] ** 0.75 * tau       # (chunk_n, nx', ny', neta', ntau')
+            chunk_sum  = ed_scaled.max(axis=(1, 2)).sum(axis=0)  # (neta', ntau')
+            acc    = chunk_sum if acc is None else acc + chunk_sum
+            total += stop - start
+
+        raw_ref = np.maximum(acc / total, eps)
+        if self.name == 'etau75_eta_3d':
+            self.ref = raw_ref
+        else:  # etau75_eta_shape_3d
+            ref_peak = raw_ref.max(axis=0, keepdims=True)          # (1, ntau')
+            self.ref = np.maximum(raw_ref / np.maximum(ref_peak, eps), eps)
+
     def fit_transform(self, data: np.ndarray) -> np.ndarray:
         """Normalise *training* data.  Computes and stores ref for data-driven norms."""
         if self.name == 'none':

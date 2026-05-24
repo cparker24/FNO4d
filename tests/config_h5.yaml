@@ -28,7 +28,8 @@ start_event:  0    # first global event index
 # --- data preparation ------------------------------------------------------
 train_ratio: 0.8
 xyslice:  [null, -1]   # slice(None, -1) — drop last spatial bin
-tauslice: [null, -1]   # slice(None, -1) — drop last tau bin
+etaslice: [null, -1]   # slice(None, -1) — drop last eta bin
+tauslice: [null, null] # slice(None, None) — full tau range
 
 # --- data loaders ----------------------------------------------------------
 batch_size:      4

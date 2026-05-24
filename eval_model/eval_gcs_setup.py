@@ -217,8 +217,14 @@ def load_data(eval_cfg: dict, gcs_fs, gcs_key: Optional[str],
     overwrite       = eval_cfg.get('gcs_overwrite_cache', False)
     show_prog       = eval_cfg.get('gcs_show_progress', None)
     train_ratio     = train_cfg.get('train_ratio', 0.8)
-    xyslice         = _s(train_cfg.get('xyslice',  [None, -1]))
-    etaslice        = _s(train_cfg.get('tauslice', [None, -1]))
+    xyslice         = _s(train_cfg.get('xyslice', [None, -1]))
+    if 'etaslice' in train_cfg:
+        etaslice = _s(train_cfg['etaslice'])
+        tauslice = _s(train_cfg.get('tauslice', [None, None]))
+    else:
+        # old config: 'tauslice' was applied to the eta axis
+        etaslice = _s(train_cfg.get('tauslice', [None, -1]))
+        tauslice = slice(None, None)
 
     is_h5_cfg  = 'hdf5_files' in train_cfg
     tcfg_dir   = train_cfg.get('hdf5_dir'   if is_h5_cfg else 'input_dir',   '.')
@@ -297,10 +303,10 @@ def load_data(eval_cfg: dict, gcs_fs, gcs_key: Optional[str],
     arr     = raw['arr']
     n_train = int(arr.shape[0] * train_ratio)
     if use_split:
-        data_test = arr[n_train:][:, :, xyslice, xyslice, etaslice, :]
+        data_test = arr[n_train:][:, :, xyslice, xyslice, etaslice, tauslice]
         print(f'Test split: {data_test.shape[0]} events  shape={data_test.shape}')
     else:
-        data_test = arr[:, :, xyslice, xyslice, etaslice, :]
+        data_test = arr[:, :, xyslice, xyslice, etaslice, tauslice]
         print(f'All events: {data_test.shape[0]}  shape={data_test.shape}')
     del arr; gc.collect()
     return data_test, grid

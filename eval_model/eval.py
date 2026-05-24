@@ -124,8 +124,14 @@ def _(backend_ui, eval_file_ui, eval_mode_ui, mo, nevents_ui, train_cfg_ui):
         input_dir   = train_cfg.get('input_dir', '.')
         input_files = train_cfg['input_files']
     train_ratio     = train_cfg.get('train_ratio', 0.8)
-    xyslice         = _s(train_cfg.get('xyslice',  [None, -1]))
-    etaslice        = _s(train_cfg.get('tauslice', [None, -1]))
+    xyslice         = _s(train_cfg.get('xyslice', [None, -1]))
+    if 'etaslice' in train_cfg:
+        etaslice = _s(train_cfg['etaslice'])
+        tauslice = _s(train_cfg.get('tauslice', [None, None]))
+    else:
+        # old config: 'tauslice' was applied to the eta axis
+        etaslice = _s(train_cfg.get('tauslice', [None, -1]))
+        tauslice = slice(None, None)
     hidden_channels = train_cfg['hidden_channels']
     n_modes         = train_cfg['n_modes']
     odir            = train_cfg.get('odir', './out')
@@ -163,18 +169,18 @@ def _(backend_ui, eval_file_ui, eval_mode_ui, mo, nevents_ui, train_cfg_ui):
     print('Grid params:', {k: f'{v:.4g}' for k, v in grid.items()})
 
     arr = raw['arr']
-    #arr = arr[:, :, xyslice, xyslice, etaslice, :]
+    #arr = arr[:, :, xyslice, xyslice, etaslice, tauslice]
     #print(f'Array shape after slicing: {arr.shape}')
 
     n_train = int(arr.shape[0] * train_ratio)
     if use_train_split:
         data_test = arr[n_train:]
-        data_test = data_test[:, :, xyslice, xyslice, etaslice, :]
+        data_test = data_test[:, :, xyslice, xyslice, etaslice, tauslice]
         print(f'Array shape after slicing: {data_test.shape}')
         print(f'Train/test split at {n_train}: using {data_test.shape[0]} test events')
     else:
         data_test = arr
-        data_test = data_test[:, :, xyslice, xyslice, etaslice, :]
+        data_test = data_test[:, :, xyslice, xyslice, etaslice, tauslice]
         print(f'Array shape after slicing: {data_test.shape}')
         print(f'Using all {data_test.shape[0]} events from eval file')
 

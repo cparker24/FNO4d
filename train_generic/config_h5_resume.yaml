@@ -116,15 +116,19 @@ lazy: true
 # This should match the normalization block used in the original training run.
 # The normalizer is preferably loaded from the checkpoint (normalizer.npz);
 # this block is only used as a fallback if normalizer.npz is not found.
+# Data-driven normalizers stream the training split in chunks to compute their
+# reference — norm_chunk_size controls peak RAM during that step.
 normalization:
   name: none              # none | etau75_3d | etau75_eta_3d |
                           # etau75_eta_shape_3d | cosh_etau75_3d
   # alpha: 1.0            # only used by cosh_etau75_3d
+norm_chunk_size: 64       # [lazy, data-driven] events per chunk when computing ref
 
 # --- data preparation ------------------------------------------------------
 train_ratio: 0.8
 xyslice:  [null, -1]      # must match the original training run
-tauslice: [null, -1]      # must match the original training run
+etaslice: [null, -1]      # must match the original training run
+tauslice: [null, null]    # must match the original training run
 
 # --- model architecture (must match the checkpoint exactly) ---------------
 hidden_channels: 16
