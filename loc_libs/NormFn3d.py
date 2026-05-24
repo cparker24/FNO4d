@@ -103,7 +103,8 @@ class NormFn3d:
         nT  = data.shape[-1]
         tau = (np.arange(nT) * dtau + tau_min).reshape(1, 1, 1, 1, nT)
         out = data.copy()
-        out[:, 0] = (data[:, 0] / (tau + eps)) ** (1.0 / 0.75)
+        base = np.clip(np.nan_to_num(data[:, 0] / (tau + eps), nan=0.0), 0.0, None)
+        out[:, 0] = base ** (1.0 / 0.75)
         return out
 
     # =========================================================================
@@ -231,7 +232,8 @@ class NormFn3d:
 
         out = data.copy()
         ed_rescaled = data[:, 0] * ref[np.newaxis, np.newaxis, np.newaxis, :, :]
-        out[:, 0]   = (ed_rescaled / (tau + eps)) ** (1.0 / 0.75)
+        base = np.clip(np.nan_to_num(ed_rescaled / (tau + eps), nan=0.0), 0.0, None)
+        out[:, 0]   = base ** (1.0 / 0.75)
         return out
 
     # =========================================================================
@@ -325,7 +327,8 @@ class NormFn3d:
         tau = (np.arange(nT)    * dtau  + tau_min).reshape(1, 1, 1, 1,    nT)
 
         out = data.copy()
-        out[:, 0] = (data[:, 0] / (tau + eps)) ** (1.0 / 0.75) / np.cosh(eta) ** alpha
+        base = np.clip(np.nan_to_num(data[:, 0] / (tau + eps), nan=0.0), 0.0, None)
+        out[:, 0] = base ** (1.0 / 0.75) / np.cosh(eta) ** alpha
         return out
 
     # =========================================================================
@@ -471,5 +474,6 @@ class NormFn3d:
 
         out = data.copy()
         ed_rescaled = data[:, 0] * shape_ref[np.newaxis, np.newaxis, np.newaxis, :, :]
-        out[:, 0]   = (ed_rescaled / (tau + eps)) ** (1.0 / 0.75)
+        base = np.clip(np.nan_to_num(ed_rescaled / (tau + eps), nan=0.0), 0.0, None)
+        out[:, 0]   = base ** (1.0 / 0.75)
         return out
