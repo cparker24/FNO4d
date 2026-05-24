@@ -230,3 +230,70 @@ weights and convert them to the MLX format readable by this C++ library.
 | [MLX](https://github.com/ml-explore/mlx) | Array ops + Metal FFT | conda `fno_env_mlx` |
 | [metal-cpp](https://developer.apple.com/metal/cpp/) | Metal C++ bindings | bundled with MLX |
 | [nlohmann/json](https://github.com/nlohmann/json) | JSON config parsing | auto-downloaded |
+
+---
+
+## τ/η Positional Embedding — `FNOTauEta` (C++/MLX)
+
+See the root `README.md` for the physics motivation and design rationale.
+
+### New source files
+
+| File | Purpose |
+|------|---------|
+| `src/fno_tau_eta.h` | `FNOTauEta` struct declaration |
+| `src/fno_tau_eta.cpp` | `FNOTauEta` implementation |
+| `src/ops.h` | `TauBias`, `EtaBias` structs + `sinusoidal_tau_embedding` / `sinusoidal_eta_embedding` |
+| `src/ops.cpp` | Implementations of the above |
+| `src/weight_loader.h/.cpp` | `load_weights(FNOTauEta&, path)` overload |
+
+Add `fno_tau_eta.cpp` to your `CMakeLists.txt` source list alongside `fno.cpp`.
+
+### Inference example
+
+```cpp
+#include "fno_tau_eta.h"
+#include "weight_loader.h"
+
+// Build coordinate vectors from NormFn3d metadata
+std::vector<float> tau_vals(128), eta_vals(32);
+for (int i = 0; i < 128; ++i) tau_vals[i] = 0.4f + i * 0.076f;
+for (int i = 0; i < 32;  ++i) eta_vals[i] = -4.0f + i * (8.0f / 31.f);
+
+// Construct model (must match checkpoint architecture)
+neuralop::FNOTauEta model(
+    /*in_channels=*/4, /*out_channels=*/4, /*hidden_channels=*/32,
+    /*n_layers=*/6,
+    /*n_modes=*/{8, 8, 4, 6},
+    /*tau_max=*/12.4f, /*eta_max=*/4.0f
+);
+
+// Load weights — tau_max / eta_max scalars are also read from the file
+neuralop::load_weights(model, "ckpt/model.safetensors");
+
+// Input: (B, C, X, Y, Z, T)
+auto x = mlx::core::zeros({1, 4, 64, 64, 32, 128});
+
+auto pred = model.forward(x, tau_vals, eta_vals);
+mlx::core::eval(pred);
+// pred shape: (1, 4, 64, 64, 32, 128)
+```
+
+### Weight key layout (safetensors)
+
+The C++ weight loader expects the same safetensors file produced by the MLX
+Python `Trainer.checkpoint()`:
+
+| Key pattern | Loaded into |
+|-------------|-------------|
+| `_fno.lifting.fcs.{j}.weight` | `fno.lifting.fcs[j].weight` |
+| `_fno.fno_blocks.convs.{i}.weight_r / .weight_i` | `fno.blocks.convs[i]` |
+| `_fno.fno_blocks.{fno/mlp}_skips.{i}.*` | `fno.blocks.{fno/mlp}_skips[i]` |
+| `_fno.projection.fcs.{j}.weight` | `fno.projection.fcs[j].weight` |
+| `tau_biases.{i}.proj.weight` | `tau_biases[i].proj.weight` |
+| `eta_biases.{i}.proj.weight` | `eta_biases[i].proj.weight` |
+| `_tau_max` | `model.tau_max` |
+| `_eta_max` | `model.eta_max` |
+
+PyTorch safetensors (exported via `safetensors.torch.save_file`) use `fno.*`
+instead of `_fno.*`; the loader detects the format automatically.

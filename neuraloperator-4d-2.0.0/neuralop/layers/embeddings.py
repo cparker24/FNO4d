@@ -383,6 +383,98 @@ def regular_grid_nd(
     return grid
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# τ / η sinusoidal coordinate embeddings for Milne-coordinate FNO surrogates
+# ─────────────────────────────────────────────────────────────────────────────
+
+def sinusoidal_tau_embedding(tau: torch.Tensor, tau_max: float) -> torch.Tensor:
+    """2-channel sinusoidal embedding of the proper-time axis.
+
+    Parameters
+    ----------
+    tau     : (T,)  physical proper-time values [fm/c]
+    tau_max : float reference scale [fm/c]
+
+    Returns
+    -------
+    (T, 2)  columns are [sin(π·τ/τ_max), cos(π·τ/τ_max)]
+    """
+    import math
+    t = tau / tau_max
+    return torch.stack([torch.sin(math.pi * t), torch.cos(math.pi * t)], dim=-1)
+
+
+def sinusoidal_eta_embedding(eta: torch.Tensor, eta_max: float) -> torch.Tensor:
+    """2-channel sinusoidal embedding of the spacetime-rapidity axis.
+
+    sin is odd (antisymmetric in η) and cos is even (symmetric), so together
+    they distinguish forward from backward rapidity.
+
+    Parameters
+    ----------
+    eta     : (Z,)  spacetime-rapidity values η_s
+    eta_max : float |η| range used during training
+
+    Returns
+    -------
+    (Z, 2)  columns are [sin(π·η/η_max), cos(π·η/η_max)]
+    """
+    import math
+    e = eta / eta_max
+    return torch.stack([torch.sin(math.pi * e), torch.cos(math.pi * e)], dim=-1)
+
+
+class TauBias(nn.Module):
+    """Per-FNO-block learned τ-embedding injection.
+
+    Projects (T, 2) → (1, C, 1, 1, 1, T) and adds it to (B, C, X, Y, Z, T).
+
+    Parameters
+    ----------
+    channels : int  hidden width of the FNO block
+    """
+
+    def __init__(self, channels: int):
+        super().__init__()
+        self.proj = nn.Linear(2, channels, bias=False)
+        nn.init.normal_(self.proj.weight, std=0.02)
+
+    def forward(self, x: torch.Tensor, tau_emb: torch.Tensor) -> torch.Tensor:
+        """
+        x       : (B, C, X, Y, Z, T)
+        tau_emb : (T, 2)
+        """
+        T = tau_emb.shape[0]
+        bias = self.proj(tau_emb).T.contiguous().view(1, -1, 1, 1, 1, T)
+        return x + bias
+
+
+class EtaBias(nn.Module):
+    """Per-FNO-block learned η-embedding injection.
+
+    Projects (Z, 2) → (1, C, 1, 1, Z, 1) and adds it to (B, C, X, Y, Z, T).
+
+    Parameters
+    ----------
+    channels : int  hidden width of the FNO block
+    """
+
+    def __init__(self, channels: int):
+        super().__init__()
+        self.proj = nn.Linear(2, channels, bias=False)
+        nn.init.normal_(self.proj.weight, std=0.02)
+
+    def forward(self, x: torch.Tensor, eta_emb: torch.Tensor) -> torch.Tensor:
+        """
+        x       : (B, C, X, Y, Z, T)
+        eta_emb : (Z, 2)
+        """
+        Z = eta_emb.shape[0]
+        bias = self.proj(eta_emb).T.contiguous().view(1, -1, 1, 1, Z, 1)
+        return x + bias
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Utility fucntions for Rotary embedding
 # modified from https://github.com/lucidrains/x-transformers/blob/main/x_transformers/x_transformers.py
 def rotate_half(x):

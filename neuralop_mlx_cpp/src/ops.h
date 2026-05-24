@@ -112,4 +112,50 @@ struct GridEmbeddingND {
   void build_cache(const std::vector<int>& spatial_dims) const;
 };
 
+// ── τ/η sinusoidal coordinate embeddings ──────────────────────────────────
+// Designed for Milne-coordinate FNO surrogates where NormFn3d normalisation
+// removes the dominant amplitude cues along proper-time and rapidity axes.
+
+// 2-channel sinusoidal embedding of the proper-time axis.
+// tau_vals : physical τ values, length T  [fm/c]
+// tau_max  : reference scale             [fm/c]
+// Returns  : (T, 2) array, columns [sin(π·τ/τ_max), cos(π·τ/τ_max)]
+mx::array sinusoidal_tau_embedding(const std::vector<float>& tau_vals,
+                                    float tau_max);
+
+// 2-channel sinusoidal embedding of the spacetime-rapidity axis.
+// eta_vals : physical η_s values, length Z
+// eta_max  : |η| range used during training
+// Returns  : (Z, 2) array, columns [sin(π·η/η_max), cos(π·η/η_max)]
+mx::array sinusoidal_eta_embedding(const std::vector<float>& eta_vals,
+                                    float eta_max);
+
+// Per-FNO-block learned τ-embedding injection.
+// Projects (T, 2) → (1, C, 1, 1, 1, T) and adds to (B, C, X, Y, Z, T).
+struct TauBias {
+  Linear proj;  // (C, 2)  no bias
+
+  TauBias() = delete;
+  explicit TauBias(int channels);
+
+  // x       : (B, C, X, Y, Z, T)
+  // tau_emb : (T, 2)
+  // Returns : (B, C, X, Y, Z, T)
+  mx::array forward(const mx::array& x, const mx::array& tau_emb) const;
+};
+
+// Per-FNO-block learned η-embedding injection.
+// Projects (Z, 2) → (1, C, 1, 1, Z, 1) and adds to (B, C, X, Y, Z, T).
+struct EtaBias {
+  Linear proj;  // (C, 2)  no bias
+
+  EtaBias() = delete;
+  explicit EtaBias(int channels);
+
+  // x       : (B, C, X, Y, Z, T)
+  // eta_emb : (Z, 2)
+  // Returns : (B, C, X, Y, Z, T)
+  mx::array forward(const mx::array& x, const mx::array& eta_emb) const;
+};
+
 } // namespace neuralop

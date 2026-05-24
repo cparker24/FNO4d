@@ -203,4 +203,70 @@ mx::array GridEmbeddingND::forward(const mx::array& data) const {
   return mx::concatenate({data, grid}, 1);
 }
 
+// ── τ/η sinusoidal coordinate embeddings ──────────────────────────────────
+
+mx::array sinusoidal_tau_embedding(const std::vector<float>& tau_vals,
+                                    float tau_max) {
+  int T = static_cast<int>(tau_vals.size());
+  std::vector<float> sin_v(T), cos_v(T);
+  constexpr float pi = 3.14159265358979323846f;
+  for (int i = 0; i < T; ++i) {
+    float t = tau_vals[i] / tau_max;
+    sin_v[i] = std::sin(pi * t);
+    cos_v[i] = std::cos(pi * t);
+  }
+  auto s = mx::array(sin_v.data(), {T}, mx::float32);
+  auto c = mx::array(cos_v.data(), {T}, mx::float32);
+  // Stack along last axis → (T, 2)
+  return mx::stack({s, c}, /*axis=*/1);
+}
+
+mx::array sinusoidal_eta_embedding(const std::vector<float>& eta_vals,
+                                    float eta_max) {
+  int Z = static_cast<int>(eta_vals.size());
+  std::vector<float> sin_v(Z), cos_v(Z);
+  constexpr float pi = 3.14159265358979323846f;
+  for (int i = 0; i < Z; ++i) {
+    float e = eta_vals[i] / eta_max;
+    sin_v[i] = std::sin(pi * e);
+    cos_v[i] = std::cos(pi * e);
+  }
+  auto s = mx::array(sin_v.data(), {Z}, mx::float32);
+  auto c = mx::array(cos_v.data(), {Z}, mx::float32);
+  return mx::stack({s, c}, /*axis=*/1);
+}
+
+// ── TauBias ────────────────────────────────────────────────────────────────
+
+TauBias::TauBias(int channels)
+    : proj(2, channels, /*use_bias=*/false)
+{}
+
+mx::array TauBias::forward(const mx::array& x, const mx::array& tau_emb) const {
+  // tau_emb: (T, 2)
+  int T = tau_emb.shape()[0];
+  int C = x.shape()[1];
+  // Project: (T, 2) × weight.T(2, C) → (T, C)
+  auto bias = proj.forward(tau_emb);          // (T, C)
+  bias = mx::transpose(bias);                  // (C, T)
+  bias = mx::reshape(bias, {1, C, 1, 1, 1, T});
+  return mx::add(x, bias);
+}
+
+// ── EtaBias ────────────────────────────────────────────────────────────────
+
+EtaBias::EtaBias(int channels)
+    : proj(2, channels, /*use_bias=*/false)
+{}
+
+mx::array EtaBias::forward(const mx::array& x, const mx::array& eta_emb) const {
+  // eta_emb: (Z, 2)
+  int Z = eta_emb.shape()[0];
+  int C = x.shape()[1];
+  auto bias = proj.forward(eta_emb);          // (Z, C)
+  bias = mx::transpose(bias);                  // (C, Z)
+  bias = mx::reshape(bias, {1, C, 1, 1, Z, 1});
+  return mx::add(x, bias);
+}
+
 } // namespace neuralop

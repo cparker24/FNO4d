@@ -1010,3 +1010,98 @@ FNO4d/
     ├── train.py                 # single entry point for all six backend × data-source modes
     └── config.yaml              # template config — set backend and data_source to switch modes
 ```
+
+---
+
+## τ/η Positional Embedding — `FNOTauEta`
+
+### Why it helps
+
+`NormFn3d` normalisation (variants `etau75_*`, `cosh_etau75_*`, …) rescales
+fields by their τ- and η-dependent envelope, removing the dominant Bjorken
+cooling (`e(τ) ∝ τ^{−4/3}`) and forward-rapidity suppression
+(`e(η) ∝ 1/cosh(η)`) from the input.  After normalisation the FNO no longer
+has an amplitude cue to locate itself along these axes.  Without explicit
+positional information the same spectral kernels are applied at early and late
+proper time, and at mid-rapidity and forward rapidity, even though the physics
+(cooling rate, longitudinal gradients, collective flow) differs qualitatively
+across both.
+
+`FNOTauEta` injects sinusoidal coordinate information at two complementary
+depths:
+
+1. **Input concatenation** — four extra channels (`sin`, `cos` for τ and η)
+   are appended before the lifting MLP so the very first projection already
+   sees the coordinate.
+2. **Per-block additive bias** — a small `Linear(2 → C)` adds a τ- or
+   η-dependent bias after every FNO layer, refreshing the positional signal
+   through depth.
+
+Parameter overhead is negligible: `n_layers × 4 × hidden_channels` extra
+weights.
+
+### Available in all three backends
+
+| Backend | Module |
+|---------|--------|
+| PyTorch | `from neuralop.models import FNOTauEta` |
+| MLX | `from neuralop_mlx.models import FNOTauEta` |
+| C++ / MLX | `#include "fno_tau_eta.h"` (see `neuralop_mlx_cpp/README.md`) |
+
+### PyTorch — training
+
+```python
+import torch
+from neuralop.models import FNOTauEta
+from neuralop.models.fno_tau_eta import make_tau_tensor, make_eta_tensor
+
+model = FNOTauEta(
+    in_channels=4,          # e.g. ed, vx, vy, vz
+    out_channels=4,
+    hidden_channels=32,
+    n_modes=(8, 8, 4, 6),  # (mx, my, m_eta, m_tau)
+    n_layers=6,
+    tau_max=12.4,           # fm/c  — must match NormFn3d tau_max
+    eta_max=4.0,            # |η|   — must match NormFn3d eta_max
+).cuda()
+
+# Reconstruct coordinate tensors from NormFn3d metadata
+tau = make_tau_tensor(tau_min=0.4, dtau=0.076, n_tau=128, device="cuda")
+eta = make_eta_tensor(eta_min=-4.0, deta=0.25,  n_eta=32,  device="cuda")
+
+# Training loop
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+for x_batch, y_batch in train_loader:
+    pred = model(x_batch, tau=tau, eta=eta)
+    loss = criterion(pred, y_batch)
+    loss.backward()
+    optimizer.step()
+    optimizer.zero_grad()
+
+# Save — tau_max / eta_max are stored in state_dict['_metadata'] via BaseModel
+torch.save({"state_dict": model.state_dict()}, "ckpt.pt")
+```
+
+### PyTorch — inference / resume
+
+```python
+ckpt = torch.load("ckpt.pt", map_location="cpu")
+meta = ckpt["state_dict"]["_metadata"]
+model = FNOTauEta(
+    in_channels=meta["in_channels"],
+    out_channels=meta["out_channels"],
+    hidden_channels=meta["hidden_channels"],
+    n_modes=meta["n_modes"],
+    n_layers=meta["n_layers"],
+    tau_max=meta["tau_max"],
+    eta_max=meta["eta_max"],
+)
+model.load_state_dict(ckpt["state_dict"])
+model.eval()
+
+with torch.no_grad():
+    pred = model(x, tau=tau, eta=eta)
+```
+
+See `README_mlx.md` for the MLX equivalent and `neuralop_mlx_cpp/README.md` for
+C++ inference.
