@@ -281,18 +281,20 @@ if lazy:
                                normalizer=normalizer)
 
 else:
-    # Eager: materialise, normalise the full arrays up-front, then create datasets.
-    # normalizer=None because the arrays are already normalised.
-    data_train  = arr[0:n_train]
-    data_verify = arr[n_train:n_total]
+    # Eager: materialise, slice, normalise up-front, then create datasets.
+    # Slices applied before normalizer.fit_transform so ref is computed from the
+    # same (neta', ntau') region used at runtime — matching the lazy path.
+    # normalizer omitted from DatasetCls because the arrays are already normalised.
+    data_train  = arr[0:n_train][:, :, xyslice, xyslice, etaslice, tauslice]
+    data_verify = arr[n_train:n_total][:, :, xyslice, xyslice, etaslice, tauslice]
     del arr
     gc.collect()
 
     data_train  = normalizer.fit_transform(data_train)
     data_verify = normalizer.transform(data_verify)
 
-    dataset_train = DatasetCls(data_train, xyslice=xyslice, etaslice=etaslice, tauslice=tauslice)
-    dataset_val   = DatasetCls(data_verify, xyslice=xyslice, etaslice=etaslice, tauslice=tauslice)
+    dataset_train = DatasetCls(data_train)
+    dataset_val   = DatasetCls(data_verify)
 
 normalizer_path = f'{model_dir}/normalizer.npz'
 normalizer.save(normalizer_path)

@@ -418,8 +418,8 @@ if lazy:
                                normalizer=normalizer)
 
 else:
-    data_train  = arr[0:n_train]
-    data_verify = arr[n_train:n_total]
+    data_train  = arr[0:n_train][:, :, xyslice, xyslice, etaslice, tauslice]
+    data_verify = arr[n_train:n_total][:, :, xyslice, xyslice, etaslice, tauslice]
     del arr
     gc.collect()
 
@@ -430,8 +430,8 @@ else:
         data_train = normalizer.transform(data_train)
     data_verify = normalizer.transform(data_verify)
 
-    dataset_train = DatasetCls(data_train, xyslice=xyslice, etaslice=etaslice, tauslice=tauslice)
-    dataset_val   = DatasetCls(data_verify, xyslice=xyslice, etaslice=etaslice, tauslice=tauslice)
+    dataset_train = DatasetCls(data_train)
+    dataset_val   = DatasetCls(data_verify)
 
 # Always (re-)save the normalizer to model_dir so it stays in sync with the
 # resumed model weights.
