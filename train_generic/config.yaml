@@ -56,7 +56,8 @@ normalization:
 # --- data preparation ---
 train_ratio: 0.8
 xyslice:  [null, -1]      # slice(None, -1) — drop last spatial bin
-tauslice: [null, -1]      # slice(None, -1) — drop last tau bin
+etaslice: [null, -1]      # slice(None, -1) — drop last eta bin
+tauslice: [null, null]    # slice(None, None) — full tau range
 
 # --- model ---
 hidden_channels: 16

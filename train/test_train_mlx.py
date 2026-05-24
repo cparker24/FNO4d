@@ -21,7 +21,8 @@ nevents_in = 10
 log_directly = True
 checkpoint_freq = None
 train_ratio = 0.8
-xyslice = slice(None, -1)
+xyslice  = slice(None, -1)
+etaslice = slice(None, None)
 tauslice = slice(None, -1)
 
 lr = 8e-3
@@ -86,6 +87,7 @@ log(f'checkpoint_freq: {checkpoint_freq}')
 log(f'n_modes: {n_modes}')
 log(f'train_ratio: {train_ratio}')
 log(f'xyslice: {xyslice}')
+log(f'etaslice: {etaslice}')
 log(f'tauslice: {tauslice}')
 log(f'log_directly: {log_directly}')
 log(f'nevents(in): {nevents_in}')
@@ -107,7 +109,7 @@ for key in arr_data.keys():
         log(f'  {key}: {arr_data[key]}')
 
 arr = arr_data['arr']
-arr = arr[:, :, xyslice, xyslice, tauslice, :]
+arr = arr[:, :, xyslice, xyslice, etaslice, tauslice]
 del arr_data
 gc.collect()
 

@@ -129,6 +129,7 @@ checkpoint_freq = cfg.get('checkpoint_freq', None)
 min_save_epoch  = cfg.get('min_save_epoch', None)
 train_ratio     = cfg.get('train_ratio', 0.8)
 xyslice         = _slice(cfg.get('xyslice',  [None, -1]))
+etaslice        = _slice(cfg.get('etaslice', [None, None]))
 tauslice        = _slice(cfg.get('tauslice', [None, -1]))
 lr              = cfg['lr']
 weight_decay    = cfg.get('weight_decay', 1e-4)
@@ -184,6 +185,7 @@ log(f'min_save_epoch:   {min_save_epoch}')
 log(f'n_modes:          {n_modes}')
 log(f'train_ratio:      {train_ratio}')
 log(f'xyslice:          {xyslice}')
+log(f'etaslice:         {etaslice}')
 log(f'tauslice:         {tauslice}')
 log(f'log_directly:     {log_directly}')
 log(f'AdamW lr:         {lr}')
@@ -266,16 +268,16 @@ if lazy:
     _needs_fit = normalizer.name in ('etau75_eta_3d', 'etau75_eta_shape_3d')
     if _needs_fit:
         log('[norm] data-driven normalizer: materialising training split for ref ...')
-        normalizer.fit_transform(arr[0:n_train])   # populates normalizer.ref; result discarded
+        normalizer.fit_transform(arr[0:n_train][:, :, xyslice, xyslice, etaslice, tauslice])   # populates normalizer.ref; result discarded
         gc.collect()
         log(f'[norm] ref computed  shape={normalizer.ref.shape}')
 
     # normalizer is applied per-event inside __getitem__
     dataset_train = DatasetCls(arr, indices=train_indices,
-                               xyslice=xyslice, tauslice=tauslice,
+                               xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
                                normalizer=normalizer)
     dataset_val   = DatasetCls(arr, indices=val_indices,
-                               xyslice=xyslice, tauslice=tauslice,
+                               xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
                                normalizer=normalizer)
 
 else:
@@ -289,8 +291,8 @@ else:
     data_train  = normalizer.fit_transform(data_train)
     data_verify = normalizer.transform(data_verify)
 
-    dataset_train = DatasetCls(data_train, xyslice=xyslice, tauslice=tauslice)
-    dataset_val   = DatasetCls(data_verify, xyslice=xyslice, tauslice=tauslice)
+    dataset_train = DatasetCls(data_train, xyslice=xyslice, etaslice=etaslice, tauslice=tauslice)
+    dataset_val   = DatasetCls(data_verify, xyslice=xyslice, etaslice=etaslice, tauslice=tauslice)
 
 normalizer_path = f'{model_dir}/normalizer.npz'
 normalizer.save(normalizer_path)

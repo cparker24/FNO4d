@@ -124,7 +124,8 @@ normalization:
 # --- data preparation ------------------------------------------------------
 train_ratio: 0.8
 xyslice:  [null, -1]      # must match the original training run
-tauslice: [null, -1]      # must match the original training run
+etaslice: [null, -1]      # must match the original training run
+tauslice: [null, null]    # must match the original training run
 
 # --- model architecture (must match the checkpoint exactly) ---------------
 hidden_channels: 16

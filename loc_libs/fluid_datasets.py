@@ -77,9 +77,11 @@ class _FluidDatasetH5Base(Dataset):
                   Pass np.arange(n_train) / np.arange(n_train, n_total) to express
                   train/val splits without slicing the source array.
     xyslice    : slice or None
-                  Applied to the nx and ny axes of each event.  None = no trim.
-    tauslice   : slice or None
+                  Applied to both nx and ny axes of each event.  None = no trim.
+    etaslice   : slice or None
                   Applied to the neta axis of each event.  None = no trim.
+    tauslice   : slice or None
+                  Applied to the ntau axis of each event.  None = no trim.
     normalizer : Normalizer or None
                   When set, normalizer.transform(ev) is applied per event inside
                   __getitem__.  Use this in lazy mode so the transform runs on
@@ -87,10 +89,11 @@ class _FluidDatasetH5Base(Dataset):
                   For eager mode (full array already normalised), leave as None.
     """
 
-    def __init__(self, data, indices=None, xyslice=None, tauslice=None, normalizer=None):
+    def __init__(self, data, indices=None, xyslice=None, etaslice=None, tauslice=None, normalizer=None):
         self.data        = data
         self.indices     = np.asarray(indices, dtype=np.intp) if indices is not None else None
         self.xyslice     = xyslice  if xyslice  is not None else slice(None)
+        self.etaslice    = etaslice if etaslice is not None else slice(None)
         self.tauslice    = tauslice if tauslice is not None else slice(None)
         self._normalizer = normalizer if (normalizer is not None and
                                           getattr(normalizer, 'name', 'none') != 'none') else None
@@ -102,7 +105,7 @@ class _FluidDatasetH5Base(Dataset):
     def _get_raw(self, local_idx):
         gi = int(self.indices[local_idx]) if self.indices is not None else local_idx
         ev = self.data[gi]   # (nFeatures, nx, ny, neta, ntau)
-        ev = ev[:, self.xyslice, self.xyslice, self.tauslice, :]
+        ev = ev[:, self.xyslice, self.xyslice, self.etaslice, self.tauslice]
         if self._normalizer is not None:
             ev = self._normalizer.transform(ev[np.newaxis])[0]
         return ev

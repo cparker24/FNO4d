@@ -90,7 +90,8 @@ log_directly    = cfg.get('log_directly', True)
 checkpoint_freq  = cfg.get('checkpoint_freq', None)
 min_save_epoch   = cfg.get('min_save_epoch', None)
 train_ratio      = cfg.get('train_ratio', 0.8)
-xyslice         = _slice(cfg.get('xyslice', [None, -1]))
+xyslice         = _slice(cfg.get('xyslice',  [None, -1]))
+etaslice        = _slice(cfg.get('etaslice', [None, None]))
 tauslice        = _slice(cfg.get('tauslice', [None, -1]))
 lr               = cfg['lr']
 weight_decay     = cfg.get('weight_decay', 1e-4)
@@ -147,6 +148,7 @@ log(f'min_save_epoch:  {min_save_epoch}')
 log(f'n_modes:         {n_modes}')
 log(f'train_ratio:     {train_ratio}')
 log(f'xyslice:         {xyslice}')
+log(f'etaslice:        {etaslice}')
 log(f'tauslice:        {tauslice}')
 log(f'log_directly:    {log_directly}')
 log(f'nevents(in):     {nevents_in}')
@@ -185,7 +187,7 @@ for key in arr_data.keys():
         log(f'  {key}: {arr_data[key]}')
 
 arr = arr_data['arr']
-arr = arr[:, :, xyslice, xyslice, tauslice, :]
+arr = arr[:, :, xyslice, xyslice, etaslice, tauslice]
 
 grid_params = {k: arr_data[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
 del arr_data

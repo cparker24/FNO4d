@@ -209,8 +209,14 @@ def _(eval_cfg, gcs_fs, gcs_key, mo, storage_opts, train_cfg):
     _overwrite    = eval_cfg.get('gcs_overwrite_cache', False)
     _show_prog    = eval_cfg.get('gcs_show_progress', None)
     _train_ratio  = train_cfg.get('train_ratio', 0.8)
-    _xyslice      = _s(train_cfg.get('xyslice',  [None, -1]))
-    _etaslice     = _s(train_cfg.get('tauslice', [None, -1]))
+    _xyslice      = _s(train_cfg.get('xyslice', [None, -1]))
+    if 'etaslice' in train_cfg:
+        _etaslice = _s(train_cfg['etaslice'])
+        _tauslice = _s(train_cfg.get('tauslice', [None, None]))
+    else:
+        # old config: 'tauslice' was applied to the eta axis
+        _etaslice = _s(train_cfg.get('tauslice', [None, -1]))
+        _tauslice = slice(None, None)
 
     _is_h5_cfg  = 'hdf5_files' in train_cfg
     _tcfg_dir   = train_cfg.get('hdf5_dir'   if _is_h5_cfg else 'input_dir',   '.')
@@ -302,11 +308,11 @@ def _(eval_cfg, gcs_fs, gcs_key, mo, storage_opts, train_cfg):
     n_train = int(arr.shape[0] * _train_ratio)
     if _use_split:
         data_test = arr[n_train:]
-        data_test = data_test[:, :, _xyslice, _xyslice, _etaslice, :]
+        data_test = data_test[:, :, _xyslice, _xyslice, _etaslice, _tauslice]
         print(f'Test split: {data_test.shape[0]} events  shape={data_test.shape}')
     else:
         data_test = arr
-        data_test = data_test[:, :, _xyslice, _xyslice, _etaslice, :]
+        data_test = data_test[:, :, _xyslice, _xyslice, _etaslice, _tauslice]
         print(f'All events: {data_test.shape[0]}  shape={data_test.shape}')
     del arr; _gc.collect()
     return data_test, grid

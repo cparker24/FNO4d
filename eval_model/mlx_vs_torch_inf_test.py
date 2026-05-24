@@ -85,8 +85,14 @@ def _s(v):
 input_dir       = cfg.get("input_dir", ".")
 input_files     = cfg["input_files"]
 train_ratio     = cfg.get("train_ratio", 0.8)
-xyslice         = _s(cfg.get("xyslice",  [None, -1]))
-etaslice        = _s(cfg.get("tauslice", [None, -1]))
+xyslice         = _s(cfg.get("xyslice", [None, -1]))
+if 'etaslice' in cfg:
+    etaslice = _s(cfg['etaslice'])
+    tauslice = _s(cfg.get('tauslice', [None, None]))
+else:
+    # old config: 'tauslice' was applied to the eta axis
+    etaslice = _s(cfg.get('tauslice', [None, -1]))
+    tauslice = slice(None, None)
 hidden_channels = cfg["hidden_channels"]
 n_modes         = cfg["n_modes"]
 
@@ -105,7 +111,7 @@ grid = {k: raw[k] for k in ("tau_min","dtau","eta_min","deta","x_min","dx","y_mi
 print("Grid   :", {k: f"{v:.4g}" for k, v in grid.items()})
 
 arr  = raw["arr"]
-arr  = arr[:, :, xyslice, xyslice, etaslice, :]
+arr  = arr[:, :, xyslice, xyslice, etaslice, tauslice]
 print(f"Shape  : {arr.shape}  (N, C, nx, ny, neta, tau)")
 
 n_train   = int(arr.shape[0] * train_ratio)
