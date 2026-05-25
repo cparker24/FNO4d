@@ -251,14 +251,17 @@ Add `fno_tau_eta.cpp` to your `CMakeLists.txt` source list alongside `fno.cpp`.
 
 ### Inference example
 
+`tau_vals` and `eta_vals` are **not** stored in the checkpoint (only `_tau_max` / `_eta_max` are).  `NormFn3d` is stateless — the physical grid parameters (`tau_min`, `dtau`, `eta_min`, `deta`) are not persisted automatically and must be tracked in your training YAML or read from the data dict returned by `read_3d_data()`.  Unlike the Python backends, the C++ API has **no** empty-vector fallback — both vectors must always be provided.
+
 ```cpp
 #include "fno_tau_eta.h"
 #include "weight_loader.h"
 
-// Build coordinate vectors from NormFn3d metadata
+// Build coordinate vectors from your training config or data file metadata
+// (tau_min, dtau, eta_min, deta must be recorded at training time)
 std::vector<float> tau_vals(128), eta_vals(32);
-for (int i = 0; i < 128; ++i) tau_vals[i] = 0.4f + i * 0.076f;
-for (int i = 0; i < 32;  ++i) eta_vals[i] = -4.0f + i * (8.0f / 31.f);
+for (int i = 0; i < 128; ++i) tau_vals[i] = 0.4f + i * 0.076f;   // tau_min=0.4, dtau=0.076
+for (int i = 0; i < 32;  ++i) eta_vals[i] = -4.0f + i * (8.0f / 31.f); // eta_min=-4, deta=8/31
 
 // Construct model (must match checkpoint architecture)
 neuralop::FNOTauEta model(

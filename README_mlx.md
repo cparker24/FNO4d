@@ -501,7 +501,6 @@ trainer.train(
 import mlx.core as mx
 import mlx.utils
 from neuralop_mlx.models import FNOTauEta
-from neuralop_mlx.models.fno_tau_eta import make_tau_tensor, make_eta_tensor
 
 # Reconstruct architecture (use the same hyperparams as training)
 model = FNOTauEta(
@@ -519,9 +518,28 @@ model.eta_max = eta_max
 nested = mlx.utils.tree_unflatten(list(params.items()))
 model.update(nested)
 mx.eval(model.parameters())
+```
 
-tau = make_tau_tensor(tau_min=0.4, dtau=0.076, n_tau=128)
-eta = make_eta_tensor(eta_min=-4.0, deta=0.25,  n_eta=32)
+`tau` and `eta` coordinate tensors are **not** stored in the checkpoint — only `_tau_max` / `_eta_max` are.  The physical grid parameters (`tau_min`, `dtau`, `eta_min`, `deta`) are not persisted automatically; `NormFn3d` is stateless and takes them as arguments on every call.  You must track them yourself (e.g. in your training YAML or read them from the data dict returned by `read_3d_data()`).  Two options:
+
+**Option A — pass `None` (uniform linspace fallback)**
+
+Falls back to `mx.linspace(0, tau_max, T)` and `mx.linspace(-eta_max, +eta_max, Z)`.  Correct only if the data covers those ranges uniformly:
+
+```python
+pred = model(x)          # tau=None, eta=None → linspace defaults
+mx.eval(pred)
+```
+
+**Option B — exact physical grid from your data / config**
+
+```python
+from neuralop_mlx.models.fno_tau_eta import make_tau_tensor, make_eta_tensor
+
+# grid params come from read_3d_data() or your training config
+data = read_3d_data("path/to/file.root")
+tau = make_tau_tensor(tau_min=data["tau_min"], dtau=data["dtau"], n_tau=x.shape[-1])
+eta = make_eta_tensor(eta_min=data["eta_min"], deta=data["deta"], n_eta=x.shape[-2])
 
 pred = model(x, tau=tau, eta=eta)
 mx.eval(pred)

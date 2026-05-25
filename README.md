@@ -50,6 +50,11 @@ Two parallel training stacks are provided:
 - [Tests](#tests)
 - [Porting status (PyTorch → MLX)](#porting-status-pytorch--mlx)
 - [Repository layout](#repository-layout)
+- [τ/η Positional Embedding — `FNOTauEta`](#τη-positional-embedding--fnotaueta)
+  - [Why it helps](#why-it-helps)
+  - [Available in all three backends](#available-in-all-three-backends)
+  - [PyTorch — training](#pytorch--training)
+  - [PyTorch — inference / resume](#pytorch--inference--resume)
 - [Credits and Attribution](#credits-and-attribution)
   - [Fork modifications to neuraloperator](#fork-modifications-to-neuraloperator)
 
@@ -1098,6 +1103,28 @@ model = FNOTauEta(
 )
 model.load_state_dict(ckpt["state_dict"])
 model.eval()
+```
+
+`tau` and `eta` coordinate tensors are **not** stored in the model checkpoint — `_metadata` only holds the constructor kwargs (`tau_max`, `eta_max`).  The physical grid parameters (`tau_min`, `dtau`, `eta_min`, `deta`) are not persisted automatically; `NormFn3d` is stateless and takes them as arguments on every call.  You must track them yourself (e.g. in your training YAML or read them from the data dict returned by `read_3d_data()`).  Two options at inference time:
+
+**Option A — pass `None` (uniform linspace fallback)**
+
+The model falls back to `torch.linspace(0, tau_max, T)` and `torch.linspace(-eta_max, +eta_max, Z)`.  Correct only if the data covers those ranges uniformly:
+
+```python
+with torch.no_grad():
+    pred = model(x)          # tau=None, eta=None → linspace defaults
+```
+
+**Option B — exact physical grid from your data / config**
+
+```python
+from neuralop.models.fno_tau_eta import make_tau_tensor, make_eta_tensor
+
+# grid params come from read_3d_data() or your training config
+data = read_3d_data("path/to/file.root")
+tau = make_tau_tensor(tau_min=data["tau_min"], dtau=data["dtau"], n_tau=x.shape[-1])
+eta = make_eta_tensor(eta_min=data["eta_min"], deta=data["deta"], n_eta=x.shape[-2])
 
 with torch.no_grad():
     pred = model(x, tau=tau, eta=eta)
