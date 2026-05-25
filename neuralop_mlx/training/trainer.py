@@ -139,12 +139,23 @@ class Trainer:
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
         flat = dict(mlx.utils.tree_flatten(self.model.parameters()))
+        # Persist tau_max / eta_max for FNOTauEta (and any model that exposes them).
+        for attr in ("tau_max", "eta_max"):
+            if hasattr(self.model, attr):
+                flat[f"_{attr}"] = mx.array(float(getattr(self.model, attr)))
         mx.save_safetensors(str(save_dir / f"{name}.safetensors"), flat)
 
     def load_checkpoint(self, save_dir: Union[str, Path], name: str = "model"):
         save_dir = Path(save_dir)
         path = save_dir / f"{name}.safetensors"
-        params = mx.load(str(path))
+        params = dict(mx.load(str(path)))
+        # Restore tau_max / eta_max scalars before loading weights.
+        for attr in ("tau_max", "eta_max"):
+            key = f"_{attr}"
+            if key in params and hasattr(self.model, attr):
+                setattr(self.model, attr, float(params.pop(key)))
+            else:
+                params.pop(key, None)
         # Rebuild the nested structure and load into model
         nested = mlx.utils.tree_unflatten(list(params.items()))
         self.model.update(nested)

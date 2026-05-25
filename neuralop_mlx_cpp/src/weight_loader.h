@@ -9,6 +9,7 @@
 #include <mlx/mlx.h>
 
 #include "fno.h"
+#include "fno_tau_eta.h"
 
 namespace neuralop {
 
@@ -21,5 +22,9 @@ void load_weights(FNO& model, const std::string& path);
 
 // Lower-level: load from a pre-parsed weight map
 void load_weights_from_map(FNO& model, const WeightMap& W, bool is_pt_format);
+
+// FNOTauEta variants — same format detection, also reads tau_max/eta_max scalars
+void load_weights(FNOTauEta& model, const std::string& path);
+void load_weights_from_map(FNOTauEta& model, const WeightMap& W, bool is_pt_format);
 
 } // namespace neuralop

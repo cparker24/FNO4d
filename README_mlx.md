@@ -437,3 +437,117 @@ FNO2Mlx/
     ├── test_compare_torch_mlx.py  # numerical PyTorch vs MLX comparison
     └── test_weight_transfer.py    # load_from_torch tests (2D/3D/4D, file/live)
 ```
+
+---
+
+## τ/η Positional Embedding — `FNOTauEta` (MLX)
+
+See the root `README.md` for the physics motivation and design rationale.
+
+### Training (MLX)
+
+```python
+import mlx.core as mx
+import mlx.nn as nn
+from neuralop_mlx.models import FNOTauEta
+from neuralop_mlx.models.fno_tau_eta import make_tau_tensor, make_eta_tensor
+from neuralop_mlx.training import Trainer
+from neuralop_mlx.training.losses import LpLoss
+
+model = FNOTauEta(
+    in_channels=4,
+    out_channels=4,
+    hidden_channels=32,
+    n_modes=(8, 8, 4, 6),  # (mx, my, m_eta, m_tau)
+    n_layers=6,
+    tau_max=12.4,
+    eta_max=4.0,
+)
+
+# Reconstruct coordinate tensors from NormFn3d metadata
+tau = make_tau_tensor(tau_min=0.4, dtau=0.076, n_tau=128)  # (T,)
+eta = make_eta_tensor(eta_min=-4.0, deta=0.25,  n_eta=32)  # (Z,)
+
+# FNOTauEta expects tau / eta passed on each forward call.
+# Wrap the call so the Trainer's training loop can use a standard interface:
+class FNOTauEtaWrapped(nn.Module):
+    def __init__(self, base, tau, eta):
+        super().__init__()
+        self.base = base
+        self.tau  = tau
+        self.eta  = eta
+    def __call__(self, x):
+        return self.base(x, tau=self.tau, eta=self.eta)
+
+wrapped = FNOTauEtaWrapped(model, tau, eta)
+
+trainer = Trainer(model=wrapped, verbose=True)
+trainer.train(
+    train_loader=train_loader,
+    test_loaders={"test": test_loader},
+    training_loss=LpLoss(d=4, p=2),
+    eval_losses={"l2": LpLoss(d=4, p=2)},
+    optimizer_params={"lr": 1e-3},
+    n_epochs=200,
+    save_dir="./ckpt",
+)
+# Checkpoint written to ./ckpt/model.safetensors
+# tau_max and eta_max are stored as "_tau_max" / "_eta_max" scalar entries.
+```
+
+### Inference / resume (MLX)
+
+```python
+import mlx.core as mx
+import mlx.utils
+from neuralop_mlx.models import FNOTauEta
+
+# Reconstruct architecture (use the same hyperparams as training)
+model = FNOTauEta(
+    in_channels=4, out_channels=4, hidden_channels=32,
+    n_modes=(8, 8, 4, 6), n_layers=6,
+    tau_max=12.4, eta_max=4.0,
+)
+
+# Load checkpoint — tau_max / eta_max scalars are restored automatically
+params = dict(mx.load("ckpt/model.safetensors"))
+tau_max = float(params.pop("_tau_max", mx.array(model.tau_max)))
+eta_max = float(params.pop("_eta_max", mx.array(model.eta_max)))
+model.tau_max = tau_max
+model.eta_max = eta_max
+nested = mlx.utils.tree_unflatten(list(params.items()))
+model.update(nested)
+mx.eval(model.parameters())
+```
+
+`tau` and `eta` coordinate tensors are **not** stored in the checkpoint — only `_tau_max` / `_eta_max` are.  The physical grid parameters (`tau_min`, `dtau`, `eta_min`, `deta`) are not persisted automatically; `NormFn3d` is stateless and takes them as arguments on every call.  You must track them yourself (e.g. in your training YAML or read them from the data dict returned by `read_3d_data()`).  Two options:
+
+**Option A — pass `None` (uniform linspace fallback)**
+
+Falls back to `mx.linspace(0, tau_max, T)` and `mx.linspace(-eta_max, +eta_max, Z)`.  Correct only if the data covers those ranges uniformly:
+
+```python
+pred = model(x)          # tau=None, eta=None → linspace defaults
+mx.eval(pred)
+```
+
+**Option B — exact physical grid from your data / config**
+
+```python
+from neuralop_mlx.models.fno_tau_eta import make_tau_tensor, make_eta_tensor
+
+# grid params come from read_3d_data() or your training config
+data = read_3d_data("path/to/file.root")
+tau = make_tau_tensor(tau_min=data["tau_min"], dtau=data["dtau"], n_tau=x.shape[-1])
+eta = make_eta_tensor(eta_min=data["eta_min"], deta=data["deta"], n_eta=x.shape[-2])
+
+pred = model(x, tau=tau, eta=eta)
+mx.eval(pred)
+```
+
+### Checkpointing details
+
+The `Trainer.checkpoint()` method automatically writes `_tau_max` and `_eta_max`
+as rank-0 float32 entries into the safetensors file whenever the model has
+`tau_max` / `eta_max` attributes.  This makes the checkpoint self-contained:
+the inference code can read the scales back without a separate config file.

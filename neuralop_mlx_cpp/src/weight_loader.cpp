@@ -23,6 +23,7 @@
 //  projection.fcs.j.weight / .bias
 
 #include "weight_loader.h"
+#include "fno_tau_eta.h"
 
 #include <stdexcept>
 #include <string>
@@ -203,6 +204,79 @@ void load_weights(FNO& model, const std::string& path) {
         "Cannot detect weight format in '" + path +
         "'. Expected key 'fno_blocks.convs.0.weight_r' (MLX) or "
         "'fno_blocks.convs.0.weight.tensor' (PyTorch).");
+  }
+
+  load_weights_from_map(model, W, /*is_pt_format=*/is_pt);
+}
+
+// ── FNOTauEta weight loading ─────────────────────────────────────────────────
+//
+// Key layout written by the MLX trainer checkpoint():
+//
+//   MLX keys for base FNO internals (produced by mlx.utils.tree_flatten):
+//     _fno.lifting.fcs.{j}.weight / .bias
+//     _fno.fno_blocks.convs.{i}.weight_r / .weight_i / .bias
+//     ... (same pattern as FNO, prefixed with "_fno.")
+//
+//   Per-block bias keys:
+//     tau_biases.{i}.proj.weight
+//     eta_biases.{i}.proj.weight
+//
+//   Scalars:
+//     _tau_max   (rank-0 float32)
+//     _eta_max   (rank-0 float32)
+//
+// PyTorch safetensors keys use "fno." prefix instead of "_fno.".
+
+static WeightMap strip_prefix(const WeightMap& W, const std::string& prefix) {
+  WeightMap out;
+  for (const auto& [k, v] : W) {
+    if (k.size() > prefix.size() && k.substr(0, prefix.size()) == prefix)
+      out[k.substr(prefix.size())] = v;
+  }
+  return out;
+}
+
+void load_weights_from_map(FNOTauEta& model, const WeightMap& W,
+                            bool is_pt_format) {
+  // Load tau_max / eta_max scalars if present.
+  if (auto it = W.find("_tau_max"); it != W.end())
+    model.tau_max = mx::item<float>(it->second);
+  if (auto it = W.find("_eta_max"); it != W.end())
+    model.eta_max = mx::item<float>(it->second);
+
+  // Strip the FNO sub-model prefix and delegate to the existing FNO loader.
+  // MLX format uses "_fno." prefix; PyTorch format uses "fno." prefix.
+  const std::string fno_prefix = is_pt_format ? "fno." : "_fno.";
+  auto fno_W = strip_prefix(W, fno_prefix);
+  if (!fno_W.empty()) {
+    load_weights_from_map(model.fno, fno_W, is_pt_format);
+  }
+
+  // Load per-block bias weights.
+  for (int i = 0; i < model.fno.n_layers; ++i) {
+    std::string tp = "tau_biases." + std::to_string(i) + ".proj.";
+    if (auto* w = find(W, tp + "weight"))
+      model.tau_biases[i].proj.weight = *w;
+
+    std::string ep = "eta_biases." + std::to_string(i) + ".proj.";
+    if (auto* w = find(W, ep + "weight"))
+      model.eta_biases[i].proj.weight = *w;
+  }
+}
+
+void load_weights(FNOTauEta& model, const std::string& path) {
+  auto [W, meta] = mx::load_safetensors(path);
+
+  // Detect format by looking for FNO sub-model keys.
+  bool is_mlx = (W.count("_fno.fno_blocks.convs.0.weight_r") > 0
+              || W.count("fno_blocks.convs.0.weight_r") > 0);
+  bool is_pt  = (W.count("fno.fno_blocks.convs.0.weight.tensor") > 0
+              || W.count("fno_blocks.convs.0.weight.tensor") > 0);
+
+  if (!is_mlx && !is_pt) {
+    throw std::runtime_error(
+        "Cannot detect FNOTauEta weight format in '" + path + "'.");
   }
 
   load_weights_from_map(model, W, /*is_pt_format=*/is_pt);
