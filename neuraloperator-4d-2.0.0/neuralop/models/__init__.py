@@ -1,5 +1,6 @@
 from .fno import TFNO, FNO
 from .fno_tau_eta import FNOTauEta
+from .causal_fno_4d import CausalFNO4D, CausalFNO4DTauEta
 
 # only import SFNO if torch_harmonics is built locally
 try:

@@ -29,10 +29,10 @@ the model causal.
 With kernel size K=2 and a doubling dilation schedule (1, 2, 4, ...),
 L layers give a causal receptive field of (2^L - 1) timesteps:
 
-    L=4  :  receptive field 15 tau-steps
-    L=6  :  receptive field 63 tau-steps
-    L=7  :  receptive field 127 tau-steps   <-- covers T=128
-    L=8  :  receptive field 255 tau-steps   <-- covers T=150 with margin
+    L=4  :  receptive field 16 tau-steps
+    L=6  :  receptive field 64 tau-steps
+    L=7  :  receptive field 128 tau-steps   <-- covers T=128
+    L=8  :  receptive field 256 tau-steps   <-- covers T=150 with margin
 
 Tensor layout throughout: (B, C, X, Y, Z, T).
 
@@ -180,18 +180,21 @@ class CausalTimeFNOBlock(nn.Module):
         y_s = self.spatial_conv(x_s) + self.spatial_skip(x_s)
         y_s = F.gelu(y_s)
         C_out = y_s.shape[1]
-        # (B*T, C', X, Y, Z)  ->  (B, C', X, Y, Z, T)
-        y_s = y_s.reshape(B, T, C_out, X, Y, Z).permute(0, 2, 3, 4, 5, 1)
+        # Store as (B, X, Y, Z, C', T) so the temporal reshape below is a free
+        # zero-copy view (avoids a duplicate contiguous allocation mid-block).
+        y_s = y_s.reshape(B, T, C_out, X, Y, Z).permute(0, 3, 4, 5, 2, 1).contiguous()
 
         # ── 2. Causal 1D temporal convolution at every spatial point ─────────
-        # (B, C', X, Y, Z, T)  ->  (B*X*Y*Z, C', T)
-        y_t = y_s.permute(0, 2, 3, 4, 1, 5).reshape(B * X * Y * Z, C_out, T)
+        # (B, X, Y, Z, C', T)  ->  (B*X*Y*Z, C', T)  — zero-copy view
+        y_t = y_s.reshape(B * X * Y * Z, C_out, T)
         # Left-only pad of (K-1)*d zeros: this is what enforces causality
         # AND preserves the length T at the output.
         pad_left = (self.t_kernel_size - 1) * self.t_dilation
         y_t = F.pad(y_t, (pad_left, 0))      # pad LEFT only along last dim
         y_t = self.temporal_conv(y_t)        # output length == T
         # (B*X*Y*Z, C', T)  ->  (B, C', X, Y, Z, T)
+        # Note: no activation here — GELU lives at the start of the spatial stage
+        # (pre-activation residual pattern: next block's GELU activates blk(x)+x).
         return y_t.reshape(B, X, Y, Z, C_out, T).permute(0, 4, 1, 2, 3, 5)
 
 

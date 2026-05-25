@@ -1,0 +1,100 @@
+# ---------------------------------------------------------------------------
+# FNO training config — model-type selector, pure PyTorch (ROOT input)
+#
+# Usage:
+#   python train_torch_sel.py [--config config_sel.yaml]
+#
+# One key selects the data source:
+#   data_source: local | gcs_download | gcs_stream
+#
+# One key selects the model architecture:
+#   model_type: fno | causal_fno4d | causal_fno4d_tau_eta
+#
+# Keys marked [local]    are only read when data_source is local.
+# Keys marked [gcs]      are read for gcs_download and gcs_stream.
+# Keys marked [download] are only read when data_source is gcs_download.
+# ---------------------------------------------------------------------------
+
+# --- mode selection --------------------------------------------------------
+data_source: local        # local | gcs_download | gcs_stream
+
+# --- output ----------------------------------------------------------------
+odir:      ./out          # logs, metrics, training curves
+model_dir: ./checkpoints  # best_model.safetensors and periodic checkpoints
+
+# --- input data ------------------------------------------------------------
+# [local] directory prepended to each entry in input_files
+input_dir: ../data
+
+# For local:        bare filenames  (e.g. dAu_25ev_mb.root)
+# For gcs_*:        full gs:// URIs (e.g. gs://my-bucket/data/file.root)
+input_files:
+  - dAu_25ev_mb.root
+  #- gs://test_fno/dAu_25ev_mb.root
+
+nevents_in: 10            # events to load (-1 = all)
+
+# --- GCS authentication [gcs] ----------------------------------------------
+gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
+
+# --- GCS download cache [download] -----------------------------------------
+local_data_dir:    ../data  # directory where downloaded files are cached
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ----------------------------------------
+# If set, odir is uploaded to {gcs_output_prefix}/logs after training.
+# Remove or set to null to skip.
+#gcs_output_prefix: gs://test_fno/runs/run01
+
+# --- normalisation ---------------------------------------------------------
+normalization:
+  name: none              # none | etau75_3d | etau75_eta_3d |
+                          # etau75_eta_shape_3d | cosh_etau75_3d
+  # alpha: 1.0            # exponent for cosh_etau75_3d (default 1.0)
+
+# --- data preparation ------------------------------------------------------
+train_ratio: 0.8
+xyslice:  [null, -1]      # slice(None, -1) — drop last spatial bin
+etaslice: [null, -1]      # slice(None, -1) — drop last eta bin
+tauslice: [null, null]    # slice(None, None) — full tau range
+
+# --- model -----------------------------------------------------------------
+# model_type selects the model architecture:
+#   fno                  — standard 4D FNO (default)
+#   causal_fno4d         — causal FNO: 3D SpectralConv + causal Conv1d along tau
+#   causal_fno4d_tau_eta — causal FNO + sinusoidal tau/eta positional embeddings
+model_type: fno
+
+hidden_channels: 16
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
+                           # For causal_fno4d*, only first 3 entries are used (tau handled by Conv1d)
+
+# Extra kwargs forwarded to CausalFNO4D / CausalFNO4DTauEta when model_type is causal_fno4d*.
+# n_layers controls depth and temporal receptive field: RF = 2^n_layers for K=2 doubling.
+#   n_layers=7 -> RF=128 tau-steps (covers T=128)
+#   n_layers=8 -> RF=256 tau-steps (covers T=150 with margin)
+#causal_fno4d:
+#  n_layers: 7
+#  t_kernel_size: 2
+#  dilation_schedule: double   # double | constant
+#  factorization: tucker
+#  rank: 0.05
+#  tau_max: 12.4   # [fm/c]  — causal_fno4d_tau_eta only
+#  eta_max: 4.0    #          — causal_fno4d_tau_eta only
+
+# --- training --------------------------------------------------------------
+n_epochs: 3
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [10]    # eval batch size per test resolution
+
+# --- optimizer -------------------------------------------------------------
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---------------------------------------------------------------
+log_directly: true        # mirror output to training.log

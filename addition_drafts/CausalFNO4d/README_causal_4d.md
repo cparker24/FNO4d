@@ -163,16 +163,16 @@ For $K = 2, d = $ doubling:
 
 | `n_layers` | Temporal receptive field |
 |-----------:|-------------------------:|
-| 4          | 15  τ-steps              |
-| 5          | 31  τ-steps              |
-| 6          | 63  τ-steps              |
-| 7          | 127 τ-steps              |
-| 8          | 255 τ-steps              |
+| 4          | 16  τ-steps              |
+| 5          | 32  τ-steps              |
+| 6          | 64  τ-steps              |
+| 7          | 128 τ-steps              |
+| 8          | 256 τ-steps              |
 
 Pick the smallest `n_layers` for which `temporal_receptive_field >=`
-the maximum lag in T that physically matters for your prediction.
-For full $T = 128$ coverage use `n_layers=7`; for $T = 150$ use
-`n_layers=8` (it's cheap to err on the side of more coverage).
+the number of T steps in your dataset.
+For full $T = 128$ coverage use `n_layers=7` (RF = 128); for $T = 150$
+use `n_layers=8` (RF = 256; cheap to err on the side of more coverage).
 
 ### Temporal kernel size (`t_kernel_size`)
 

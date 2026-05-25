@@ -55,6 +55,11 @@ Two parallel training stacks are provided:
   - [Available in all three backends](#available-in-all-three-backends)
   - [PyTorch — training](#pytorch--training)
   - [PyTorch — inference / resume](#pytorch--inference--resume)
+- [Causal FNO — `CausalFNO4D` / `CausalFNO4DTauEta`](#causal-fno--causalfno4d--causalfno4dtaueta)
+  - [Physical motivation](#physical-motivation)
+  - [Choosing parameters](#choosing-parameters-1)
+  - [PyTorch — training](#pytorch--training-1)
+  - [PyTorch — inference](#pytorch--inference)
 - [Credits and Attribution](#credits-and-attribution)
   - [Fork modifications to neuraloperator](#fork-modifications-to-neuraloperator)
 
@@ -1132,3 +1137,160 @@ with torch.no_grad():
 
 See `README_mlx.md` for the MLX equivalent and `neuralop_mlx_cpp/README.md` for
 C++ inference.
+
+---
+
+## Causal FNO — `CausalFNO4D` / `CausalFNO4DTauEta`
+
+### Physical motivation
+
+A standard 4D FNO treats all axes $(X, Y, Z, \tau)$ symmetrically: one joint
+FFT, one block of spectral weights, the same mode truncation on every axis.
+For the proper-time axis that assumption breaks in three ways:
+
+- **Periodicity** — the FFT assumes the signal wraps around; $\tau_0$ (initial
+  condition) and $\tau_\text{max}$ (freeze-out) have nothing to do with each
+  other.
+- **Two-sided receptive field** — the spectral convolution can mix information
+  from later $\tau$ into earlier $\tau$, violating causality at the
+  representation level.
+- **Non-stationarity** — early-time gradients are orders of magnitude larger
+  than late-time gradients; a single set of spectral weights must compromise
+  between regimes.
+
+`CausalFNO4D` addresses these structurally:
+
+- **3D SpectralConv** over $(X, Y, Z)$ per timestep (T folded into the batch),
+  keeping the global spatial receptive field and Tucker factorisation.
+- **Causal dilated Conv1d** along $\tau$ with a left-only zero pad:
+  output at $\tau$ depends only on inputs at $\tau' \leq \tau$.  Causality is
+  a hard structural property — not trained-in or regularised.
+
+With kernel size $K=2$ and a doubling dilation schedule the temporal
+receptive field after $L$ layers is $2^L$ timesteps:
+
+| `n_layers` | Temporal receptive field |
+|-----------:|-------------------------:|
+| 4          | 16  τ-steps              |
+| 5          | 32  τ-steps              |
+| 6          | 64  τ-steps              |
+| 7          | 128 τ-steps  ← covers T=128 |
+| 8          | 256 τ-steps  ← covers T=150 with margin |
+
+`CausalFNO4DTauEta` adds the same two-part sinusoidal $\tau$/$\eta$ embedding
+as `FNOTauEta` (input concatenation + per-block bias refresh), giving the
+network explicit positional information along both axes.
+
+Full architecture details and parameter-mapping table from TFNO:
+see [`addition_drafts/CausalFNO4d/README_causal_4d.md`](addition_drafts/CausalFNO4d/README_causal_4d.md).
+
+### Choosing parameters
+
+- **`n_modes_spatial`** — 3-tuple $(m_x, m_y, m_z)$; same considerations as
+  TFNO spatial modes.  Drop the $\tau$ entry: e.g. TFNO `(8,8,8,6)` → `(8,8,8)`.
+- **`n_layers`** — sets both depth and temporal receptive field.  Use 7 for
+  $T=128$, 8 for $T \leq 150$.
+- **`t_kernel_size`** — default 2 (binary-tree connections, most efficient).
+  Raise to 3 or 4 for more taps per layer at the cost of more parameters.
+- **`dilation_schedule`** — `"double"` (recommended) for exponential RF growth;
+  `"constant"` for a strictly local Markovian model.
+- **`factorization`, `rank`** — forwarded to SpectralConv; same semantics as
+  TFNO.  Tucker + rank 0.05 is the recommended default.
+- **`tau_max`, `eta_max`** (`CausalFNO4DTauEta` only) — reference scales for
+  the sinusoidal embedding; match to your physical grid.
+
+Check coverage after construction:
+
+```python
+print(model.temporal_receptive_field)   # must be >= T in your dataset
+```
+
+### PyTorch — training
+
+Set `model_type` in your YAML config and optionally provide a `causal_fno4d`
+block with extra kwargs:
+
+```yaml
+# config.yaml
+model_type: causal_fno4d_tau_eta   # fno | causal_fno4d | causal_fno4d_tau_eta
+
+n_modes: [8, 8, 8, 8]   # only first 3 entries used for causal_fno4d*
+
+causal_fno4d:
+  n_layers: 7
+  t_kernel_size: 2
+  dilation_schedule: double
+  factorization: tucker
+  rank: 0.05
+  tau_max: 12.4   # fm/c  — causal_fno4d_tau_eta only
+  eta_max: 4.0    #        — causal_fno4d_tau_eta only
+```
+
+Then run the training script as usual:
+
+```bash
+python train_torch.py --config config.yaml
+```
+
+For `causal_fno4d_tau_eta` the script automatically reads `tau_min`, `dtau`,
+`eta_min`, `deta` from the data file and constructs the coordinate tensors,
+so no extra work is needed at the call site.
+
+Or instantiate directly in Python:
+
+```python
+from neuralop.models import CausalFNO4D, CausalFNO4DTauEta
+
+# Base causal model
+model = CausalFNO4D(
+    in_channels=4, out_channels=4, hidden_channels=32,
+    n_modes_spatial=(8, 8, 8),
+    n_layers=7, t_kernel_size=2,
+    factorization="tucker", rank=0.05,
+).cuda()
+
+# With τ/η embedding (recommended when using NormFn3d normalisation)
+model = CausalFNO4DTauEta(
+    in_channels=4, out_channels=4, hidden_channels=32,
+    n_modes_spatial=(8, 8, 8),
+    n_layers=7, t_kernel_size=2,
+    factorization="tucker", rank=0.05,
+    tau_max=12.4, eta_max=4.0,
+).cuda()
+```
+
+### PyTorch — inference
+
+```python
+from neuralop.models import CausalFNO4DTauEta
+from neuralop.models.causal_fno_4d import make_tau_tensor, make_eta_tensor
+
+# Rebuild the model (same constructor kwargs as training)
+model = CausalFNO4DTauEta(
+    in_channels=4, out_channels=4, hidden_channels=32,
+    n_modes_spatial=(8, 8, 8),
+    n_layers=7, t_kernel_size=2,
+    factorization="tucker", rank=0.05,
+    tau_max=12.4, eta_max=4.0,
+)
+model.load_state_dict(torch.load("best_model.pt", weights_only=False)["state_dict"])
+model.eval()
+
+# Coordinate tensors from your data / config
+tau = make_tau_tensor(tau_min=0.4,  dtau=0.094, n_tau=128, device=device)
+eta = make_eta_tensor(eta_min=-3.9, deta=0.2,   n_eta=40,  device=device)
+
+with torch.no_grad():
+    pred = model(x, tau=tau, eta=eta)   # (B, 4, X, Y, Z, T)
+```
+
+`CausalFNO4D` (without embedding) has the same forward signature but takes
+only `x`; `tau` and `eta` are not used.
+
+To verify causality structurally after any model change:
+
+```python
+from neuralop.models.causal_fno_4d import verify_causality
+ok = verify_causality(model, shape=(1, 4, 8, 8, 8, 32))
+assert ok
+```
