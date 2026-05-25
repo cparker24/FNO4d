@@ -118,7 +118,9 @@ passed via `--config`).
 | `batch_size` | `1` | events per mini-batch |
 | `train_ratio` | `0.8` | fraction of events used for training |
 | `hidden_channels` | `16` | FNO channel width |
-| `n_modes` | `[32,32,16,16]` | Fourier modes per spatial/time dimension `[x, y, η, τ]` |
+| `n_modes` | `[32,32,16,16]` | Fourier modes per spatial/time dimension `[x, y, η, τ]`; for `causal_fno4d*` only the first 3 entries are used |
+| `model_type` | `fno` | architecture: `fno` (default) \| `causal_fno4d` \| `causal_fno4d_tau_eta` — see [Causal FNO](#causal-fno--causalfno4d--causalfno4dtaueta) in README.md |
+| `causal_fno4d` | _(map)_ | extra kwargs for `CausalFNO4D` / `CausalFNO4DTauEta` when `model_type` is `causal_fno4d*`; see config.yaml comments for available keys |
 | `lr` | `8e-3` | AdamW learning rate |
 | `weight_decay` | `1e-4` | AdamW weight decay |
 | `test_batch_sizes` | `[10]` | eval batch size per test resolution |

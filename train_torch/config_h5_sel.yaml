@@ -1,0 +1,118 @@
+# ---------------------------------------------------------------------------
+# FNO training config — model-type selector, pure PyTorch, HDF5 multi-file input
+#
+# Usage:
+#   python train_torch_h5_sel.py [--config config_h5_sel.yaml]
+#
+# One key selects the data source:
+#   data_source: local | gcs_download
+#
+# One key selects the model architecture:
+#   model_type: fno | causal_fno4d | causal_fno4d_tau_eta
+#
+# Keys marked [local]    are only read when data_source is local.
+# Keys marked [download] are only read when data_source is gcs_download.
+# Keys marked [lazy]     only matter when lazy: true.
+# Keys marked [eager]    only matter when lazy: false.
+# All other keys behave identically to config_h5.yaml (ROOT-based training).
+# ---------------------------------------------------------------------------
+
+# --- mode selection --------------------------------------------------------
+data_source: local        # local | gcs_download
+                          # (gcs_stream is not supported: h5py requires local paths)
+
+# --- output ----------------------------------------------------------------
+odir:      ./out          # logs, metrics, training curves
+model_dir: ./checkpoints  # best_model.safetensors and periodic checkpoints
+
+# --- input data (HDF5) -----------------------------------------------------
+# [local]    bare filenames; hdf5_dir is prepended to each entry
+# [download] full gs:// URIs; files are downloaded to local_data_dir first
+hdf5_dir: ../data         # [local] directory containing .h5 files
+
+# Pre-converted .h5 files from convert_root_to_hdf5().
+# All files must share grid dimensions (nFeatures, nx, ny, neta, ntau);
+# a ValueError is raised on mismatch.  Files are concatenated in order.
+hdf5_files:
+  - dAu_25ev_mb.h5
+  # - dAu_25ev_mb_2.h5             # [local]    add more files here
+  #- gs://test_fno/dAu_25ev_mb.h5  # [download] use gs:// URIs instead
+
+nevents_in:  10   # events to load (-1 = all across all files)
+start_event:  0   # first global event index
+
+# --- GCS authentication [download] -----------------------------------------
+gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
+
+# --- GCS download cache [download] -----------------------------------------
+local_data_dir:    ../data  # directory where downloaded .h5 files are cached
+overwrite_cache:   false    # true = re-download even if file size matches
+gcs_show_progress: false    # null=auto  true=always  false=never
+
+# --- GCS output upload (optional) ------------------------------------------
+# Applies to both data_source modes.  Set gcs_output_prefix to upload odir
+# (logs, curves, metrics) after training.  Remove or set to null to skip.
+#gcs_output_prefix: gs://test_fno/runs/run01
+
+# --- loading strategy ------------------------------------------------------
+# true  [lazy]  → dat['arr'] is a MultiH5Array.  Data is read from disk
+#                 only when sliced — one batch at a time during the training
+#                 loop.  Peak RAM ≈ one batch.  Best for large datasets.
+# false [eager] → dat['arr'] is a contiguous ndarray loaded immediately.
+#                 Faster per-epoch iteration; requires enough RAM for the
+#                 full dataset.
+lazy: true
+
+# --- normalisation ---------------------------------------------------------
+normalization:
+  name: none              # none | etau75_3d | etau75_eta_3d |
+                          # etau75_eta_shape_3d | cosh_etau75_3d
+  # alpha: 1.0            # only used by cosh_etau75_3d
+norm_chunk_size: 64       # [lazy, data-driven] events per chunk when computing ref
+
+# --- data preparation ------------------------------------------------------
+train_ratio: 0.8
+xyslice:  [null, -1]      # slice(None, -1) — drop last spatial bin
+etaslice: [null, -1]      # slice(None, -1) — drop last eta bin
+tauslice: [null, null]    # slice(None, None) — full tau range
+
+# --- model -----------------------------------------------------------------
+# model_type selects the model architecture:
+#   fno                  — standard 4D FNO (default)
+#   causal_fno4d         — causal FNO: 3D SpectralConv + causal Conv1d along tau
+#   causal_fno4d_tau_eta — causal FNO + sinusoidal tau/eta positional embeddings
+model_type: fno
+
+hidden_channels: 16
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
+                           # For causal_fno4d*, only first 3 entries are used (tau handled by Conv1d)
+
+# Extra kwargs forwarded to CausalFNO4D / CausalFNO4DTauEta when model_type is causal_fno4d*.
+# n_layers controls depth and temporal receptive field: RF = 2^n_layers for K=2 doubling.
+#   n_layers=7 -> RF=128 tau-steps (covers T=128)
+#   n_layers=8 -> RF=256 tau-steps (covers T=150 with margin)
+#causal_fno4d:
+#  n_layers: 7
+#  t_kernel_size: 2
+#  dilation_schedule: double   # double | constant
+#  factorization: tucker
+#  rank: 0.05
+#  tau_max: 12.4   # [fm/c]  — causal_fno4d_tau_eta only
+#  eta_max: 4.0    #          — causal_fno4d_tau_eta only
+
+# --- training --------------------------------------------------------------
+n_epochs: 1
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  10       # skip saves before this epoch; null = from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+num_workers: 4            # DataLoader background workers for prefetching; 0 = synchronous
+
+# --- optimizer -------------------------------------------------------------
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---------------------------------------------------------------
+log_directly: true        # mirror stdout to training.log
