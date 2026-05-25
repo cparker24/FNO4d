@@ -191,7 +191,7 @@ def load_last_checkpoint(trainer, optimizer, scheduler, save_dir):
         return meta['epoch'] + 1
     else:
         import torch
-        state = torch.load(save_dir / 'last_model.pt')
+        state = torch.load(save_dir / 'last_model.pt', weights_only=False)
         trainer.model.load_state_dict(state['model_state_dict'])
         optimizer.load_state_dict(state['optimizer_state_dict'])
         if scheduler is not None and 'scheduler_state_dict' in state:
