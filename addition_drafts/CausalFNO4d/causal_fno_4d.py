@@ -27,9 +27,10 @@ only on inputs at tau' <= tau. No training or regularization is required to make
 the model causal.
 
 With kernel size K=2 and a doubling dilation schedule (1, 2, 4, ...),
-L layers give a causal receptive field of (2^L - 1) timesteps:
+L layers give a causal receptive field of 2^L timesteps:
 
     L=4  :  receptive field 16 tau-steps
+    L=5  :  receptive field 32 tau-steps
     L=6  :  receptive field 64 tau-steps
     L=7  :  receptive field 128 tau-steps   <-- covers T=128
     L=8  :  receptive field 256 tau-steps   <-- covers T=150 with margin
@@ -53,10 +54,12 @@ Usage
     x = torch.randn(1, 8, 64, 64, 32, 128, device="cuda")
     y = model(x)                       # (1, 1, 64, 64, 32, 128)
 
-To swap into mg_tfno_4d_fsdp.py, replace the TFNO(...) construction with
-CausalFNO4D(...) and drop the T entry from the n_modes tuple. The patching,
-multigrid prefiltering, and FSDP wrapping with `ignored_modules` for complex
-Tucker parameters all continue to work unchanged.
+To swap into the training scripts set model_type: causal_fno4d in the YAML
+config (config_sel.yaml / config_h5_sel.yaml), read by train_torch_sel.py /
+train_torch_h5_sel.py; only the first 3 entries of n_modes are used (T is
+handled by the Conv1d). The patching, multigrid prefiltering, and FSDP
+wrapping with `ignored_modules` for complex Tucker parameters all continue
+to work unchanged.
 """
 
 from __future__ import annotations
@@ -228,7 +231,7 @@ class CausalFNO4D(nn.Module):
         Kernel size of the causal temporal convolution in every block (K).
     dilation_schedule : str
         "double"   -- dilations are 1, 2, 4, 8, ..., 2^(n_layers - 1).
-                       Receptive field along T is 2^n_layers - 1 timesteps.
+                       Receptive field along T is 2^n_layers timesteps (K=2).
         "constant" -- dilations are 1 everywhere.
                        Receptive field along T is n_layers * (K - 1) + 1.
     factorization : str

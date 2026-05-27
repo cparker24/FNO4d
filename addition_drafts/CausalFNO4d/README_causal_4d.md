@@ -5,7 +5,9 @@ as a drop-in replacement for `neuralop.models.TFNO` in problems where the
 T axis is an initial-value direction rather than just another spatial axis.
 
 This README explains the physical motivation, the architecture, and how
-its parameters map to those of the original FNO / TFNO.
+its parameters map to those of the original FNO / TFNO. It also documents
+the `CausalFNO4DTauEta` variant, which adds sinusoidal τ/η positional
+embeddings for Milne-coordinate hydrodynamics (see §10).
 
 ---
 
@@ -223,10 +225,18 @@ single `implementation=` line in `CausalTimeFNOBlock`.
 
 ---
 
-## 6. Integration with `mg_tfno_4d_fsdp.py`
+## 6. Integration with the training scripts
 
-The patching loop, multigrid prefiltering, FSDP wrapping, and
-gradient-hook logic continue to work without modification:
+Select the model from the YAML config: set `model_type: causal_fno4d`
+(or `causal_fno4d_tau_eta`) in `config_sel.yaml` / `config_h5_sel.yaml`,
+which `train_torch_sel.py` / `train_torch_h5_sel.py` read to construct the
+model. Extra constructor kwargs (`n_layers`, `t_kernel_size`,
+`dilation_schedule`, `factorization`, `rank`, and for the embedding variant
+`tau_max` / `eta_max`) go under a `causal_fno4d:` block in the same config.
+The `n_modes` entry is reused with only its first three values
+(`n_modes_spatial = n_modes[:3]`); the T entry is ignored. The patching loop,
+multigrid prefiltering, FSDP wrapping, and gradient-hook logic continue to
+work without modification:
 
 - **Patching.** Spatial patches with full T preserved per patch still
   produce inputs of shape `(B, C, X_p, Y_p, Z_p, T)`, which is what
@@ -243,7 +253,7 @@ gradient-hook logic continue to work without modification:
 - **Gradient checkpointing.** No changes needed — the block boundary
   is in the same place.
 
-Migration is therefore just the model-construction swap shown above.
+Migration is therefore just a `model_type` switch in the YAML config.
 
 ---
 
@@ -298,7 +308,81 @@ confirming the output is *exactly* unchanged at every earlier $\tau$
 
 The `verify_causality` function is exposed at module level so you can
 also call it against the patched + multigrid forward pass — useful as a
-regression test when integrating into `mg_tfno_4d_fsdp.py`.
+regression test when integrating into the training scripts.
+
+For `CausalFNO4DTauEta`, run `verify_causality` the same way — its τ/η
+embeddings are positional only, so they do not break the causal structure.
+
+---
+
+## 10. τ/η positional-embedding variant (`CausalFNO4DTauEta`)
+
+For Milne-coordinate hydrodynamics it helps the network to know *where* it
+is in proper time τ and spacetime rapidity η. `CausalFNO4DTauEta` wraps
+`CausalFNO4D` and injects that information with the same two-part scheme as
+`FNOTauEta`:
+
+1. **Input concatenation.** Four sinusoidal channels — $[\sin, \cos]$ of
+   $\pi\tau/\tau_\text{max}$ (broadcast along T) and $[\sin, \cos]$ of
+   $\pi\eta/\eta_\text{max}$ (broadcast along Z) — are appended to the
+   physical input before the lifting MLP, so the first projection already
+   sees its $(\tau, \eta)$ location. The inner `CausalFNO4D` is therefore
+   constructed with `in_channels + 4`.
+2. **Per-block additive bias.** A small `Linear(2 → hidden_channels)`
+   (`TauBias` / `EtaBias`) re-adds the positional signal after every block,
+   so it does not decay with depth.
+
+Because both injections depend only on the coordinates τ and η — never on
+field values at other timesteps — causality is preserved exactly;
+`verify_causality` passes on this model too.
+
+### Constructor
+
+Identical to `CausalFNO4D` plus two scale parameters:
+
+| argument  | meaning |
+|-----------|---------|
+| `tau_max` | reference proper time [fm/c] for the τ embedding; also the upper bound of the default τ grid when `tau` is not passed. |
+| `eta_max` | $|\eta|$ range for the η embedding; also the symmetric bound of the default η grid when `eta` is not passed. |
+
+```python
+from neuralop.models import CausalFNO4DTauEta
+
+model = CausalFNO4DTauEta(
+    in_channels=4, out_channels=4, hidden_channels=32,
+    n_modes_spatial=(8, 8, 8),
+    n_layers=7, t_kernel_size=2, rank=0.05,
+    tau_max=12.4, eta_max=4.0,
+)
+```
+
+### Forward signature
+
+```python
+y = model(x, tau, eta)   # x: (B, C, X, Y, Z, T) -> y: (B, C_out, X, Y, Z, T)
+```
+
+- `tau`: shape `(T,)`, physical proper-time values [fm/c]. Defaults to a
+  uniform grid $[0, \tau_\text{max}]$ when `None`.
+- `eta`: shape `(Z,)`, spacetime-rapidity values. Defaults to a uniform grid
+  $[-\eta_\text{max}, +\eta_\text{max}]$ when `None`.
+
+### Building τ/η from the data grid
+
+The coordinate vectors should match the dataset's grid spacing, not a
+uniform `[0, tau_max]`. Two helpers in `causal_fno_4d.py` build them from the
+`NormFn3d` grid metadata (`tau_min`, `dtau`, `eta_min`, `deta`):
+
+```python
+from neuralop.models.causal_fno_4d import make_tau_tensor, make_eta_tensor
+
+tau = make_tau_tensor(tau_min, dtau, n_tau, device=device)   # (n_tau,)
+eta = make_eta_tensor(eta_min, deta, n_eta, device=device)   # (n_eta,)
+```
+
+`train_torch_sel.py` does exactly this and pins the resulting `tau` / `eta`
+into a thin wrapper, so the neuralop `Trainer`'s `model(x)` call works
+unchanged.
 
 ---
 
