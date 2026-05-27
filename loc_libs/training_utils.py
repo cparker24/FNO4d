@@ -199,6 +199,46 @@ def load_last_checkpoint(trainer, optimizer, scheduler, save_dir):
         return state['epoch'] + 1
 
 
+def save_embedding_grid(save_dir, model_arch,
+                        tau_min, dtau, n_tau, tau_max,
+                        eta_min, deta, n_eta, eta_max):
+    """Write the τ/η embedding grid to ``save_dir/embedding_grid.json``.
+
+    Records the physical grid (origin/spacing/extent) and the sinusoid scales
+    so τ/η-embedding models can be reconstructed unambiguously when resuming
+    training or running inference, independent of whether a normalizer was used.
+    ``n_tau``/``n_eta`` are stored for reference/validation only — coordinate
+    vectors are rebuilt from origin+spacing for the actual input length.
+    """
+    import json
+    from pathlib import Path
+
+    grid = {
+        'model_arch': model_arch,
+        'tau_min': float(tau_min), 'dtau': float(dtau),
+        'n_tau': int(n_tau), 'tau_max': float(tau_max),
+        'eta_min': float(eta_min), 'deta': float(deta),
+        'n_eta': int(n_eta), 'eta_max': float(eta_max),
+    }
+    with open(Path(save_dir) / 'embedding_grid.json', 'w') as f:
+        json.dump(grid, f, indent=2)
+    return grid
+
+
+def load_embedding_grid(save_dir):
+    """Load an ``embedding_grid.json`` written by ``save_embedding_grid``.
+
+    Returns the grid dict, or ``None`` if the file is absent.
+    """
+    import json
+    from pathlib import Path
+
+    path = Path(save_dir) / 'embedding_grid.json'
+    if not path.exists():
+        return None
+    with open(path) as f:
+        return json.load(f)
+
 
 def patch_trainer_checkpoint(trainer, trainer_cls, checkpoint_freq, odir,
                               optimizer=None):

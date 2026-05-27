@@ -61,7 +61,7 @@ sys.path.insert(0, '../loc_libs')
 from read_3d_root import read_3d_data
 from memory_utils import calculate_model_memory, reset_peak_memory, log_peak_memory
 from training_utils import (RunLog, patch_trainer_logging, patch_trainer_checkpoint,
-                             save_last_checkpoint)
+                             save_last_checkpoint, save_embedding_grid)
 from parse_training_log import TrainingHistory
 from norm_utils import build_normalizer
 from fluid_datasets import FluidDataset
@@ -303,9 +303,17 @@ elif model_type == 'causal_fno4d_tau_eta':
         out_channels=4,
         hidden_channels=hidden_channels,
         n_modes_spatial=tuple(n_modes[:3]),
+        tau_min=float(grid_params['tau_min']), dtau=float(grid_params['dtau']),
+        eta_min=float(grid_params['eta_min']), deta=float(grid_params['deta']),
         **causal_cfg,
     ).to(device)
     log(f'CausalFNO4DTauEta temporal_receptive_field: {_base_model.temporal_receptive_field}')
+    save_embedding_grid(
+        model_dir, 'CausalFNO4DTauEta',
+        grid_params['tau_min'], grid_params['dtau'], n_tau, _base_model.tau_max,
+        grid_params['eta_min'], grid_params['deta'], n_eta, _base_model.eta_max,
+    )
+    log(f'embedding grid  →  {model_dir}/embedding_grid.json')
     # Thin wrapper: the neuralop Trainer calls model(x); pin tau/eta from the data grid.
     class _TauEtaTrainingWrapper(nn.Module):
         def __init__(self, m, tau, eta):
