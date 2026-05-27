@@ -59,6 +59,12 @@ class FNOTauEta(nn.Module):
         Reference proper time [fm/c].
     eta_max : float, default 4.0
         |η| range.
+    tau_min, dtau : float, optional
+        Physical τ grid origin and spacing (NormFn3d metadata). When set, a τ
+        grid is built from them via make_tau_tensor() whenever the model is
+        called without an explicit tau.
+    eta_min, deta : float, optional
+        Physical η grid origin and spacing. Used the same way for eta.
     **fno_kwargs
         Forwarded to the underlying FNO.
 
@@ -67,6 +73,8 @@ class FNOTauEta(nn.Module):
     tau_max and eta_max are stored as plain attributes.  The MLX trainer's
     checkpoint() method saves them as rank-0 tensors (keys "_tau_max" /
     "_eta_max") alongside the model weights so they are available at load time.
+    The grid params (tau_min, dtau, eta_min, deta) are persisted via the
+    embedding_grid.json sidecar written by the training script.
     """
 
     def __init__(
@@ -78,12 +86,20 @@ class FNOTauEta(nn.Module):
         n_layers: int = 6,
         tau_max: float = 12.4,
         eta_max: float = 4.0,
+        tau_min: float = None,
+        dtau: float = None,
+        eta_min: float = None,
+        deta: float = None,
         **fno_kwargs,
     ):
         super().__init__()
 
         self.tau_max = tau_max
         self.eta_max = eta_max
+        self.tau_min = tau_min
+        self.dtau = dtau
+        self.eta_min = eta_min
+        self.deta = deta
         self.n_layers = n_layers
 
         self._fno = FNO(
@@ -109,10 +125,11 @@ class FNOTauEta(nn.Module):
         Parameters
         ----------
         x   : (B, C_in, X, Y, Z, T)
-        tau : (T,) physical proper-time values [fm/c].
-              Defaults to uniform grid [0, tau_max] when None.
-        eta : (Z,) spacetime-rapidity values.
-              Defaults to uniform grid [-eta_max, +eta_max] when None.
+        tau : (T,) physical proper-time values [fm/c]. When None, the physical
+              grid is built from the stored tau_min/dtau; if those were not set
+              at construction a ValueError is raised (no silent fallback).
+        eta : (Z,) spacetime-rapidity values. Built from eta_min/deta when None,
+              with the same error if unavailable.
 
         Returns
         -------
@@ -121,9 +138,21 @@ class FNOTauEta(nn.Module):
         B, C_in, X, Y, Z, T = x.shape
 
         if tau is None:
-            tau = mx.linspace(0.0, self.tau_max, T)
+            if self.tau_min is None or self.dtau is None:
+                raise ValueError(
+                    "FNOTauEta: no tau grid available. Pass tau=... explicitly, "
+                    "or construct the model with tau_min/dtau so the physical "
+                    "grid can be built."
+                )
+            tau = make_tau_tensor(self.tau_min, self.dtau, T)
         if eta is None:
-            eta = mx.linspace(-self.eta_max, self.eta_max, Z)
+            if self.eta_min is None or self.deta is None:
+                raise ValueError(
+                    "FNOTauEta: no eta grid available. Pass eta=... explicitly, "
+                    "or construct the model with eta_min/deta so the physical "
+                    "grid can be built."
+                )
+            eta = make_eta_tensor(self.eta_min, self.deta, Z)
 
         tau_emb = sinusoidal_tau_embedding(tau, self.tau_max)  # (T, 2)
         eta_emb = sinusoidal_eta_embedding(eta, self.eta_max)  # (Z, 2)

@@ -1,0 +1,114 @@
+# ---------------------------------------------------------------------------
+# FNO resume training config — model-type selector, pure PyTorch, HDF5 input
+#
+# Usage:
+#   python resume_train_h5_torch_sel.py [--config config_h5_resume_sel.yaml]
+#
+# Extends config_h5_sel.yaml with resume-specific keys.  All keys from
+# config_h5_sel.yaml are still valid here.  The model_type / causal_fno4d
+# block MUST match the original training run so the checkpoint loads cleanly.
+#
+# Resume scenario quick-reference
+# --------------------------------
+# 1. Same machine, resume from last checkpoint (most common):
+#      resume_model_source: local
+#      resume_model_dir:    ./checkpoints
+#      checkpoint_type:     last
+#      total_epochs:        200
+#
+# 2. Resume from a periodic checkpoint (epoch 50):
+#      checkpoint_type:  periodic
+#      checkpoint_epoch: 50
+#
+# 3. Resume from GCS (download checkpoint, train locally):
+#      resume_model_source: gcs_download
+#      resume_model_dir:    gs://my-bucket/runs/run01/checkpoints
+#      local_model_cache:   ./cache/checkpoints
+#      gcs_key_file:        ./my-service-account.json
+#
+# τ/η models (model_type: causal_fno4d_tau_eta)
+# ---------------------------------------------
+# The physical τ/η grid is restored from embedding_grid.json (searched in the
+# checkpoint dir then model_dir), written by the original run.  If absent, the
+# grid falls back to the current dataset's grid params (with a warning).
+# ---------------------------------------------------------------------------
+
+# --- mode selection --------------------------------------------------------
+data_source: local         # local | gcs_download
+
+# --- resume configuration --------------------------------------------------
+total_epochs: 200          # remaining = total_epochs − (last saved epoch)
+resume_model_source: local # local | gcs_download
+resume_model_dir: ./checkpoints   # dir with last_model.pt (or gs:// URI); default model_dir
+local_model_cache: ./cache/checkpoints   # [gcs_download only]
+checkpoint_type: last      # last | periodic
+# checkpoint_epoch: 50     # [periodic only] epoch N of checkpoint_N/
+
+# --- output ----------------------------------------------------------------
+odir:      ./out
+model_dir: ./checkpoints
+
+# --- input data (HDF5) -----------------------------------------------------
+hdf5_dir: ../data
+hdf5_files:
+  - dAu_25ev_mb.h5
+  # - dAu_25ev_mb_2.h5
+
+nevents_in:  10
+start_event:  0
+
+# --- GCS authentication (required for gcs_download) -----------------------
+gcs_key_file: ./fnotest-wayne-gcs.json
+local_data_dir:    ../data
+overwrite_cache:   false
+gcs_show_progress: false
+# gcs_output_prefix: gs://my-bucket/runs/run01_resume
+
+# --- loading strategy ------------------------------------------------------
+lazy: true
+
+# --- normalisation (should match the original run; loaded from checkpoint) -
+normalization:
+  name: none              # none | etau75_3d | etau75_eta_3d |
+                          # etau75_eta_shape_3d | cosh_etau75_3d
+  # alpha: 1.0
+norm_chunk_size: 64
+
+# --- data preparation (must match the original run) ------------------------
+train_ratio: 0.8
+xyslice:  [null, -1]
+etaslice: [null, -1]
+tauslice: [null, null]
+
+# --- model (must match the checkpoint exactly) -----------------------------
+# model_type: fno | causal_fno4d | causal_fno4d_tau_eta
+model_type: fno
+
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]   # [x, y, eta, tau]; causal_fno4d* use first 3 only
+
+# Extra kwargs for CausalFNO4D / CausalFNO4DTauEta (must match the original run).
+#causal_fno4d:
+#  n_layers: 7
+#  t_kernel_size: 2
+#  dilation_schedule: double   # double | constant
+#  factorization: tucker
+#  rank: 0.05
+#  tau_max: 12.4   # [fm/c]  — causal_fno4d_tau_eta only
+#  eta_max: 4.0    #          — causal_fno4d_tau_eta only
+
+# --- training (for the resumed portion only) -------------------------------
+batch_size: 1
+checkpoint_freq: null
+min_save_epoch:  null
+save_last: true
+eval_interval: 2
+test_batch_sizes: [2]
+num_workers: 4
+
+# --- optimizer (loaded from checkpoint for checkpoint_type: last) ----------
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---------------------------------------------------------------
+log_directly: true         # append-mode: resumes appending to training.log
