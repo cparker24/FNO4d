@@ -52,7 +52,6 @@ plugins:
   - search
   - redirects:
       redirect_maps:
-        'README.md': 'index.md'
         'README_train.md': 'train.md'
         'README_train_gcs.md': 'train_gcs.md'
         'README_train_generic.md': 'train_generic.md'
