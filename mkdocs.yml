@@ -3,6 +3,8 @@ site_url: https://jhputschke.codeberg.page/FNO4d/
 repo_url: https://codeberg.org/jhputschke/FNO4d
 repo_name: jhputschke/FNO4d
 
+use_directory_urls: false
+
 validation:
   links:
     not_found: ignore
