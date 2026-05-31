@@ -1,0 +1,1 @@
+--8<-- "loc_libs/README_NormFn3d.md"

@@ -1,0 +1,90 @@
+site_name: FNO4d
+site_url: https://jhputschke.codeberg.page/FNO4d/
+repo_url: https://codeberg.org/jhputschke/FNO4d
+repo_name: jhputschke/FNO4d
+
+validation:
+  links:
+    not_found: ignore
+    unrecognized_links: ignore
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Training:
+    - Overview: train.md
+    - GCS Training: train_gcs.md
+    - Generic Trainer: train_generic.md
+  - Evaluation:
+    - Overview: eval.md
+    - GCS Evaluation: eval_gcs.md
+    - Metric Suite: eval_metric.md
+    - Web App: eval_web.md
+  - MLX Port: mlx.md
+  - Loss Functions: loss_fn.md
+  - Utilities:
+    - Cloud (GCS): cloud_util.md
+    - ROOT to HDF5: root2hdf5.md
+    - NormFn3d: norm_fn3d.md
+  - C++/Metal Library: cpp_library.md
+  - Porting Notes: porting_notes.md
+  - Experimental Drafts:
+    - Overview: drafts/index.md
+    - Causal FNO 4D: drafts/causal_fno.md
+    - Normalisation Pipeline: drafts/normalisation.md
+    - CausalLogLo Operator: drafts/causal_loglo.md
+    - CausalLogLo Loss: drafts/causal_loglo_loss.md
+    - "tau/eta Embedding": drafts/tau_eta_embedding.md
+  - API Reference: api.md
+
+plugins:
+  - search
+  - redirects:
+      redirect_maps:
+        'README.md': 'index.md'
+        'README_train.md': 'train.md'
+        'README_train_gcs.md': 'train_gcs.md'
+        'README_train_generic.md': 'train_generic.md'
+        'README_eval.md': 'eval.md'
+        'README_eval_gcs.md': 'eval_gcs.md'
+        'README_eval_metric.md': 'eval_metric.md'
+        'README_mlx.md': 'mlx.md'
+        'README_LossFn.md': 'loss_fn.md'
+        'PORTING_NOTES.md': 'porting_notes.md'
+        'neuralop_mlx_cpp/README.md': 'cpp_library.md'
+        'addition_drafts/CausalFNO4d/README_causal_4d.md': 'drafts/causal_fno.md'
+        'addition_drafts/CausalFNO4d/README_normalisation.md': 'drafts/normalisation.md'
+        'addition_drafts/CausalLogLo4d/README_CausalLogLo.md': 'drafts/causal_loglo.md'
+        'addition_drafts/CausalLogLo4d/README_Causal_LogLo_Loss.md': 'drafts/causal_loglo_loss.md'
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."]
+          options:
+            show_source: true
+            show_root_heading: true
+            show_category_heading: true
+            show_submodules: false
+            docstring_style: google
+
+markdown_extensions:
+  - pymdownx.snippets:
+      base_path: ["."]
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.inlinehilite
+  - admonition
+  - pymdownx.details
+  - tables
+  - toc:
+      permalink: true

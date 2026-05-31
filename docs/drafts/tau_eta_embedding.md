@@ -1,0 +1,1 @@
+--8<-- "addition_drafts/EtaTauEmeddingFNO/README tau eta embedding.md"
