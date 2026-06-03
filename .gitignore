@@ -17,3 +17,4 @@ train*/*/*.npz
 data/*
 eval_model/*/
 *-gcs.json
+.claude/settings.local.json
