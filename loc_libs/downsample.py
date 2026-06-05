@@ -29,6 +29,21 @@ Two things this module does
    and NO interpolation, which simply increases the effective dtau by the
    stride (dtau -> tau_stride * dtau).
 
+X-SCAPE-style interpolation (optional)
+--------------------------------------
+For *resampling* (as opposed to anti-aliased coarsening) the module also offers
+the exact scheme X-SCAPE's EvolutionHistory uses to read the hydro grid
+(src/framework/{LinearInterpolation.h, FluidEvolutionHistory.cc}):
+
+  * tau_interp='linear'  — linear interpolation between bracketing tau steps
+                           (Jetscape::LinearInt); allows a fractional tau_stride.
+  * spatial_target=(NX,NY,NETA) — trilinear resample of nx/ny/neta to an
+                           arbitrary shape over the same extent (TrilinearInt).
+
+Both clamp at the edges (no extrapolation) and act per field/channel, matching
+X-SCAPE.  Prefer block-mean for plain down-resolution; use these to re-grid to a
+non-integer-factor resolution or a different dtau consistently with X-SCAPE.
+
 Two entry points
 ----------------
 A. Make a new (padded/cropped) downsampled HDF5 file — offline, once:
@@ -71,7 +86,9 @@ __all__ = [
     'SPATIAL_AXES',
     'coarsen_axis',
     'skip_tau',
+    'interp_tau',
     'downsample_spatial',
+    'resample_spatial',
     'downsample',
     'downsampled_grid_params',
     'parse_downsample_cfg',
@@ -203,6 +220,55 @@ def skip_tau(arr, stride, axis=TAU_AXIS):
 
 
 # ---------------------------------------------------------------------------
+# linear (X-SCAPE-style) interpolation primitives
+# ---------------------------------------------------------------------------
+# These mirror Jetscape::LinearInt / TrilinearInt in X-SCAPE's
+# src/framework/{LinearInterpolation.h, FluidEvolutionHistory.cc}: linear weights
+# with the lower index taken by truncation and the upper neighbour CLAMPED to the
+# last cell (edge value, no extrapolation), applied independently per field/channel.
+def _lerp_axis(arr, axis, src_pos):
+    '''Linearly interpolate `arr` along `axis` at fractional source indices.
+
+    `src_pos` is a 1-D array of positions in *index units* of `axis`.  Positions
+    are clamped to [0, L-1] (edge clamp, no extrapolation) and each output sample
+    is `(1-f)*arr[i0] + f*arr[i1]` with `i0 = floor(pos)`, `i1 = min(i0+1, L-1)`,
+    `f = pos - i0` — exactly X-SCAPE's `LinearInt`.  Returns an array whose `axis`
+    length is `len(src_pos)`.
+    '''
+    axis = axis % arr.ndim
+    L = arr.shape[axis]
+    pos = np.clip(np.asarray(src_pos, dtype=np.float64), 0.0, L - 1.0)
+    i0 = np.floor(pos).astype(np.intp)
+    i1 = np.minimum(i0 + 1, L - 1)
+    a0 = np.take(arr, i0, axis=axis)
+    a1 = np.take(arr, i1, axis=axis)
+    fshape = [1] * arr.ndim
+    fshape[axis] = pos.shape[0]
+    f = (pos - i0).reshape(fshape)
+    if np.issubdtype(arr.dtype, np.floating):
+        f = f.astype(arr.dtype)
+    return (1.0 - f) * a0 + f * a1
+
+
+def interp_tau(arr, stride, axis=TAU_AXIS):
+    '''Linearly re-grid the tau axis to spacing `stride`*dtau (X-SCAPE LinearInt).
+
+    Unlike skip_tau() this *interpolates* between bracketing stored steps, so
+    `stride` may be fractional (e.g. 1.5).  tau_min is preserved; the new step
+    count is `floor((L-1)/stride) + 1` (all new steps stay within the original
+    tau span, so no extrapolation).  `stride == 1` returns `arr` unchanged.
+    '''
+    if stride == 1:
+        return arr
+    if stride <= 0:
+        raise ValueError(f"tau stride must be > 0, got {stride}")
+    axis = axis % arr.ndim
+    L = arr.shape[axis]
+    M = int(np.floor((L - 1) / stride)) + 1
+    return _lerp_axis(arr, axis, np.arange(M) * float(stride))
+
+
+# ---------------------------------------------------------------------------
 # array-level downsampling
 # ---------------------------------------------------------------------------
 def downsample_spatial(arr, factors=2, spatial_axes=SPATIAL_AXES,
@@ -224,20 +290,72 @@ def downsample_spatial(arr, factors=2, spatial_axes=SPATIAL_AXES,
     return out
 
 
+def resample_spatial(arr, target_shape, spatial_axes=SPATIAL_AXES):
+    '''Trilinear-resample the spatial axes (nx, ny, neta) to `target_shape`.
+
+    This is X-SCAPE's `TrilinearInt` (done as separable linear interpolation per
+    axis, which is identical): the target grid spans the SAME physical extent as
+    the source, with endpoints inclusive — i.e. it maps the first/last cells onto
+    themselves and linearly interpolates in between.  Each field/channel is
+    interpolated independently.  Use it to resample to an arbitrary resolution
+    (e.g. a power-of-two grid that is not an integer divisor of nx).
+
+    Unlike downsample_spatial(reduce='mean'), this does NOT area-average, so it is
+    a *resampler*, not an anti-aliasing coarsener — prefer block-mean when simply
+    reducing resolution.
+
+    target_shape : (NX, NY, NETA); use None for an axis to leave it unchanged.
+    '''
+    out = np.ascontiguousarray(arr)
+    for axis, N in zip(spatial_axes, target_shape):
+        if N is None:
+            continue
+        N = int(N)
+        if N < 1:
+            raise ValueError(f"target axis size must be >= 1, got {N}")
+        ax = axis % out.ndim
+        L = out.shape[ax]
+        if N == L:
+            continue
+        pos = np.zeros(N) if (L == 1 or N == 1) else np.linspace(0.0, L - 1.0, N)
+        out = _lerp_axis(out, ax, pos)
+    return out
+
+
 def downsample(arr, spatial_factors=1, tau_stride=1, reduce='mean',
                boundary='crop', pad_mode='edge', side='end',
+               tau_interp='skip', spatial_target=None,
                spatial_axes=SPATIAL_AXES, tau_axis=TAU_AXIS):
-    '''Combined spatial coarsening + temporal tau-skipping in one call.
+    '''Combined spatial + temporal downsampling in one call.
 
-    spatial_factors : scalar or (fx, fy, feta)  — spatial coarsening (1 = off).
-    tau_stride      : int                        — keep every k-th tau step
-                                                   (1 = off, no time downsample).
-    Other args match downsample_spatial() / skip_tau().
+    Spatial — pick one:
+      spatial_factors : scalar or (fx, fy, feta)  — block coarsen (1 = off),
+                        with `reduce`/`boundary`/`pad_mode`/`side` (the default).
+      spatial_target  : (NX, NY, NETA)            — trilinear-resample to this
+                        shape instead (X-SCAPE TrilinearInt); overrides
+                        spatial_factors/reduce/boundary when given.
+
+    Temporal:
+      tau_stride : keep/resample tau by this stride (1 = off).
+      tau_interp : 'skip'   strided pick, no interpolation (integer stride only).
+                   'linear' X-SCAPE LinearInt between steps (fractional stride OK).
     '''
-    out = downsample_spatial(arr, spatial_factors, spatial_axes=spatial_axes,
-                             reduce=reduce, boundary=boundary,
-                             pad_mode=pad_mode, side=side)
-    out = skip_tau(out, tau_stride, axis=tau_axis)
+    if spatial_target is not None:
+        out = resample_spatial(arr, spatial_target, spatial_axes=spatial_axes)
+    else:
+        out = downsample_spatial(arr, spatial_factors, spatial_axes=spatial_axes,
+                                 reduce=reduce, boundary=boundary,
+                                 pad_mode=pad_mode, side=side)
+    if tau_interp == 'linear':
+        out = interp_tau(out, tau_stride, axis=tau_axis)
+    elif tau_interp == 'skip':
+        s = int(tau_stride)
+        if s != tau_stride:
+            raise ValueError("tau_stride must be an integer when tau_interp='skip'; "
+                             "use tau_interp='linear' for fractional strides")
+        out = skip_tau(out, s, axis=tau_axis)
+    else:
+        raise ValueError(f"tau_interp must be 'skip' or 'linear', got {tau_interp!r}")
     return out
 
 
@@ -246,7 +364,8 @@ def downsample(arr, spatial_factors=1, tau_stride=1, reduce='mean',
 # ---------------------------------------------------------------------------
 def downsampled_grid_params(grid, spatial_factors=1, tau_stride=1,
                             reduce='mean', boundary='crop', side='end',
-                            pad_mode='edge'):
+                            pad_mode='edge', tau_interp='skip',
+                            spatial_target=None):
     '''Return a copy of `grid` describing the coarsened grid.
 
     Updates nx/ny/neta, dx/dy/deta, x_min/y_min/eta_min for the spatial
@@ -264,8 +383,21 @@ def downsampled_grid_params(grid, spatial_factors=1, tau_stride=1,
     Normalizer dict), the origin shift is exact for side='end' (the default);
     for side='both' it falls back to the 'end' offset.
     '''
-    fx = _as_factor_triple(spatial_factors)
     out = dict(grid)
+
+    if spatial_target is not None:
+        # trilinear resample to an explicit shape over the same physical extent
+        # (endpoints inclusive): count -> N, spacing -> d*(L-1)/(N-1), origin kept.
+        for (n_key, d_key, min_key), N in zip(_AXIS_GRID_KEYS, spatial_target):
+            if N is None or n_key not in grid:
+                continue
+            L = int(grid[n_key]); N = int(N)
+            out[n_key] = N
+            if d_key in grid and L > 1 and N > 1:
+                out[d_key] = float(grid[d_key]) * (L - 1) / (N - 1)
+        fx = (1, 1, 1)                       # skip the block-coarsen loop below
+    else:
+        fx = _as_factor_triple(spatial_factors)
 
     for (n_key, d_key, min_key), factor in zip(_AXIS_GRID_KEYS, fx):
         if factor == 1:
@@ -304,11 +436,16 @@ def downsampled_grid_params(grid, spatial_factors=1, tau_stride=1,
                                 + origin_shift * d
                                 + (factor - 1) / 2.0 * d)
 
-    if tau_stride and tau_stride > 1:
+    # tau bookkeeping is identical for 'skip' and 'linear' (both keep tau_min,
+    # scale dtau by the stride, and yield floor((L-1)/stride)+1 steps); tau_interp
+    # is accepted only so the same kwargs forward here and to downsample().
+    del tau_interp
+    if tau_stride and tau_stride != 1:
         if 'dtau' in grid:
             out['dtau'] = float(grid['dtau']) * tau_stride
         if 'choose_ntau' in grid:
-            out['choose_ntau'] = -(-int(grid['choose_ntau']) // tau_stride)
+            Lt = int(grid['choose_ntau'])
+            out['choose_ntau'] = int(np.floor((Lt - 1) / tau_stride)) + 1
 
     return out
 
@@ -325,14 +462,19 @@ def parse_downsample_cfg(cfg):
         downsample:
           spatial_factor:  2          # int  -> nx, ny, neta share one factor
           spatial_factors: [2, 2, 1]  # list -> per axis (overrides spatial_factor)
-          tau_stride:      1          # keep every K-th tau step (K=1 = off)
+          spatial_target:  [32,32,16] # trilinear-resample to this shape instead
+                                      #   (use 0/null to keep an axis); overrides
+                                      #   spatial_factor(s)/reduce/boundary
+          tau_stride:      1          # tau stride (K=1 = off; may be fractional
+                                      #   when tau_interp: linear)
+          tau_interp:      skip       # skip (decimate) | linear (X-SCAPE LinearInt)
           reduce:          mean       # mean | subsample
           boundary:        crop       # crop | pad
           pad_mode:        edge       # [boundary: pad] edge | reflect | zero | ...
           side:            end        # end  | both
 
-    Returns None when `cfg` is falsy or a no-op (all factors 1 and tau_stride 1),
-    so callers can write::
+    Returns None when `cfg` is falsy or a no-op (no spatial change and tau_stride
+    1), so callers can write::
 
         downsample_kw = parse_downsample_cfg(cfg.get('downsample'))
         if downsample_kw:
@@ -346,14 +488,31 @@ def parse_downsample_cfg(cfg):
         spatial_factors = tuple(int(x) for x in sf_list)
     else:
         spatial_factors = int(cfg.get('spatial_factor', 1))
-    tau_stride = int(cfg.get('tau_stride', 1))
 
-    if all(f == 1 for f in _as_factor_triple(spatial_factors)) and tau_stride == 1:
+    st = cfg.get('spatial_target')
+    if st is not None:
+        # 0 / null on an axis means "leave unchanged"
+        spatial_target = tuple(None if (v in (0, None, 'null')) else int(v) for v in st)
+        if all(v is None for v in spatial_target):
+            spatial_target = None
+
+    else:
+        spatial_target = None
+
+    tau_stride = cfg.get('tau_stride', 1)
+    tau_stride = int(tau_stride) if float(tau_stride).is_integer() else float(tau_stride)
+    tau_interp = cfg.get('tau_interp', 'skip')
+
+    no_spatial = (spatial_target is None and
+                  all(f == 1 for f in _as_factor_triple(spatial_factors)))
+    if no_spatial and tau_stride == 1:
         return None
 
     return dict(
         spatial_factors=spatial_factors,
+        spatial_target=spatial_target,
         tau_stride=tau_stride,
+        tau_interp=tau_interp,
         reduce=cfg.get('reduce', 'mean'),
         boundary=cfg.get('boundary', 'crop'),
         pad_mode=cfg.get('pad_mode', 'edge'),
@@ -384,11 +543,13 @@ class DownsampledArrayView:
     '''
 
     def __init__(self, base, spatial_factors=2, tau_stride=1, reduce='mean',
-                 boundary='crop', pad_mode='edge', side='end'):
+                 boundary='crop', pad_mode='edge', side='end',
+                 tau_interp='skip', spatial_target=None):
         self._base = base
         self._kw = dict(spatial_factors=spatial_factors, tau_stride=tau_stride,
                         reduce=reduce, boundary=boundary, pad_mode=pad_mode,
-                        side=side)
+                        side=side, tau_interp=tau_interp,
+                        spatial_target=spatial_target)
         if len(base) == 0:
             raise ValueError("base array is empty; nothing to downsample")
         probe = self._down(base[0])           # single 5-D event
@@ -454,6 +615,7 @@ def _load_source(paths, nevents, verbose):
 
 def write_downsampled_h5(src, dst, spatial_factors=2, tau_stride=1, reduce='mean',
                          boundary='crop', pad_mode='edge', side='end',
+                         tau_interp='skip', spatial_target=None,
                          nevents=-1, chunk_events=8, compression='lzf',
                          force=False, verbose=False):
     '''Read h5/root source(s), spatially/temporally downsample, write a new h5.
@@ -468,7 +630,11 @@ def write_downsampled_h5(src, dst, spatial_factors=2, tau_stride=1, reduce='mean
     src             : str | list[str]  — .h5 or .root source path(s) (one grid).
     dst             : str              — output .h5 path.
     spatial_factors : scalar or (fx, fy, feta) spatial coarsening factor(s).
-    tau_stride      : int   — keep every k-th tau step (1 = no time downsample).
+    spatial_target  : (NX, NY, NETA) or None — trilinear-resample to this shape
+                      instead of block-coarsening (overrides spatial_factors).
+    tau_stride      : tau stride (1 = no time downsample; fractional allowed when
+                      tau_interp='linear').
+    tau_interp      : 'skip' (decimate) | 'linear' (X-SCAPE LinearInt in tau).
     reduce, boundary, pad_mode, side : see downsample() / coarsen_axis().
     nevents         : int   — cap events (-1 = all).
     chunk_events    : int   — events processed & written per step (memory bound).
@@ -488,7 +654,8 @@ def write_downsampled_h5(src, dst, spatial_factors=2, tau_stride=1, reduce='mean
         raise FileExistsError(f"{dst} already exists (pass force=True to overwrite)")
 
     factors_t = _as_factor_triple(spatial_factors)
-    kw = dict(spatial_factors=spatial_factors, tau_stride=tau_stride, reduce=reduce,
+    kw = dict(spatial_factors=spatial_factors, spatial_target=spatial_target,
+              tau_stride=tau_stride, tau_interp=tau_interp, reduce=reduce,
               boundary=boundary, pad_mode=pad_mode, side=side)
 
     # ---- load source ------------------------------------------------------
@@ -501,8 +668,9 @@ def write_downsampled_h5(src, dst, spatial_factors=2, tau_stride=1, reduce='mean
     # ---- grid params: original -> downsampled -----------------------------
     grid     = {k: dat[k] for k in _SCALAR_KEYS if k in dat}
     new_grid = downsampled_grid_params(grid, spatial_factors=spatial_factors,
-                                       tau_stride=tau_stride, reduce=reduce,
-                                       boundary=boundary, side=side)
+                                       spatial_target=spatial_target,
+                                       tau_stride=tau_stride, tau_interp=tau_interp,
+                                       reduce=reduce, boundary=boundary, side=side)
 
     # ---- probe output shape ----------------------------------------------
     sample      = downsample(np.asarray(base[0:1]), **kw)
@@ -512,12 +680,15 @@ def write_downsampled_h5(src, dst, spatial_factors=2, tau_stride=1, reduce='mean
     chunk_shape = (min(chunk_events, n),) + item_shape
 
     print(f"Downsampling {n} events  ->  {dst}")
-    print(f"  spatial factors (nx,ny,neta) = {factors_t}   reduce={reduce}   "
-          f"boundary={boundary}" + (f"  pad_mode={pad_mode}" if boundary == 'pad' else "")
-          + f"  side={side}")
-    print(f"  tau_stride = {tau_stride}"
-          + (f"  (dtau {float(grid.get('dtau', 0)):.4g} -> {float(new_grid.get('dtau', 0)):.4g})"
-             if 'dtau' in grid and tau_stride > 1 else ""))
+    if spatial_target is not None:
+        print(f"  spatial: trilinear resample (X-SCAPE) to target {tuple(spatial_target)}")
+    else:
+        print(f"  spatial factors (nx,ny,neta) = {factors_t}   reduce={reduce}   "
+              f"boundary={boundary}" + (f"  pad_mode={pad_mode}" if boundary == 'pad' else "")
+              + f"  side={side}")
+    print(f"  tau_stride = {tau_stride}  (interp={tau_interp})"
+          + (f"  dtau {float(grid.get('dtau', 0)):.4g} -> {float(new_grid.get('dtau', 0)):.4g}"
+             if 'dtau' in grid and tau_stride != 1 else ""))
     print(f"  spatial grid: ({grid.get('nx')},{grid.get('ny')},{grid.get('neta')})"
           f" -> ({new_grid.get('nx')},{new_grid.get('ny')},{new_grid.get('neta')})")
     print(f"  ntau: {grid.get('choose_ntau', base.shape[-1])} -> {ntau_new}")
@@ -526,8 +697,8 @@ def write_downsampled_h5(src, dst, spatial_factors=2, tau_stride=1, reduce='mean
 
     # ---- per-event metadata ----------------------------------------------
     ntau_fo = np.asarray(dat['ntau_freezeout'])[:n].astype(np.int64)
-    if tau_stride > 1:                                  # active step count -> ceil(n / stride)
-        ntau_fo = -(-ntau_fo // tau_stride)
+    if tau_stride != 1:                                 # active steps -> floor((fo-1)/stride)+1
+        ntau_fo = np.maximum(np.floor((ntau_fo - 1) / tau_stride).astype(np.int64) + 1, 0)
     tau_fo = np.asarray(dat['tau_freezeout'])[:n]       # physical freeze-out time: unchanged
 
     # ---- write ------------------------------------------------------------
@@ -543,13 +714,19 @@ def write_downsampled_h5(src, dst, spatial_factors=2, tau_stride=1, reduce='mean
         hf.attrs['nevents']     = int(n)
 
         # provenance / downsample metadata
-        hf.attrs['downsample_spatial_factors'] = np.asarray(factors_t, dtype=np.int32)
-        hf.attrs['downsample_tau_stride']      = int(tau_stride)
-        hf.attrs['downsample_reduce']          = str(reduce)
-        hf.attrs['downsample_boundary']        = str(boundary)
-        hf.attrs['downsample_side']            = str(side)
-        if boundary == 'pad':
-            hf.attrs['downsample_pad_mode'] = str(pad_mode)
+        hf.attrs['downsample_tau_stride'] = float(tau_stride)
+        hf.attrs['downsample_tau_interp'] = str(tau_interp)
+        if spatial_target is not None:
+            hf.attrs['downsample_spatial_method'] = 'trilinear'
+            hf.attrs['downsample_spatial_target'] = np.asarray(
+                [int(item_shape[i + 1]) for i in range(3)], dtype=np.int32)
+        else:
+            hf.attrs['downsample_spatial_method']  = str(reduce)
+            hf.attrs['downsample_spatial_factors'] = np.asarray(factors_t, dtype=np.int32)
+            hf.attrs['downsample_boundary']        = str(boundary)
+            hf.attrs['downsample_side']            = str(side)
+            if boundary == 'pad':
+                hf.attrs['downsample_pad_mode'] = str(pad_mode)
         for (nk, _, _) in _AXIS_GRID_KEYS:
             if nk in grid:
                 hf.attrs[f'orig_{nk}'] = int(grid[nk])
@@ -596,9 +773,16 @@ def _build_arg_parser():
     g.add_argument('--spatial-factors', type=int, nargs=3, default=None,
                    metavar=('FX', 'FY', 'FETA'),
                    help='per-axis spatial factors (use 1 to skip an axis)')
+    g.add_argument('--spatial-target', type=int, nargs=3, default=None,
+                   metavar=('NX', 'NY', 'NETA'),
+                   help='trilinear-resample (X-SCAPE) to this target shape over the '
+                        'same extent (use 0 to keep an axis); overrides --spatial-factor(s)')
 
-    p.add_argument('--tau-stride', type=int, default=1, metavar='K',
-                   help='keep every K-th tau step (increases effective dtau; no interpolation)')
+    p.add_argument('--tau-stride', type=float, default=1, metavar='K',
+                   help='tau stride (increases effective dtau; fractional allowed with '
+                        '--tau-interp linear)')
+    p.add_argument('--tau-interp', choices=['skip', 'linear'], default='skip',
+                   help="skip (decimate, integer stride) or linear (X-SCAPE LinearInt)")
     p.add_argument('--reduce', choices=['mean', 'subsample'], default='mean',
                    help="spatial reduction: block-mean or strided pick")
     p.add_argument('--boundary', choices=['crop', 'pad'], default='crop',
@@ -622,22 +806,33 @@ def _build_arg_parser():
 def main(argv=None):
     args = _build_arg_parser().parse_args(argv)
 
+    spatial_target = None
+    if args.spatial_target is not None:
+        spatial_target = tuple(None if v == 0 else v for v in args.spatial_target)
+        if all(v is None for v in spatial_target):
+            spatial_target = None
+
     if args.spatial_factors is not None:
         spatial_factors = tuple(args.spatial_factors)
     elif args.spatial_factor is not None:
         spatial_factors = args.spatial_factor
     else:
-        spatial_factors = 1                      # no spatial downsample (tau-only mode)
+        spatial_factors = 1                      # no block-coarsen (tau-only / target mode)
 
-    if spatial_factors == 1 and args.tau_stride == 1:
-        print("Nothing to do: set --spatial-factor/--spatial-factors and/or --tau-stride > 1")
+    tau_stride = int(args.tau_stride) if float(args.tau_stride).is_integer() else args.tau_stride
+
+    no_spatial = (spatial_target is None and spatial_factors == 1)
+    if no_spatial and tau_stride == 1:
+        print("Nothing to do: set --spatial-factor(s)/--spatial-target and/or --tau-stride")
         return 2
 
     write_downsampled_h5(
         args.inputs if len(args.inputs) > 1 else args.inputs[0],
         args.output,
         spatial_factors=spatial_factors,
-        tau_stride=args.tau_stride,
+        spatial_target=spatial_target,
+        tau_stride=tau_stride,
+        tau_interp=args.tau_interp,
         reduce=args.reduce,
         boundary=args.boundary,
         pad_mode=args.pad_mode,

@@ -29,6 +29,24 @@ which simply increases the effective `dtau → k·dtau`. Spatial axes use a
 block **mean** (`reduce='mean'`) by default, or a strided pick
 (`reduce='subsample'`).
 
+### X-SCAPE-consistent interpolation (optional)
+
+For *resampling* (rather than anti-aliased coarsening) the module reproduces the
+exact scheme X-SCAPE's `EvolutionHistory` uses to read the hydro grid
+(`src/framework/{LinearInterpolation.h, FluidEvolutionHistory.cc}` —
+`Jetscape::LinearInt` / `TrilinearInt`):
+
+| option | what it does | mirrors |
+|---|---|---|
+| `tau_interp='linear'` | linear interpolation between bracketing τ steps; **`tau_stride` may be fractional** (e.g. `1.5`) to re-grid to an arbitrary `dtau` | `EvolutionHistory::get` (linear in τ) |
+| `spatial_target=(NX,NY,NETA)` | trilinear-resample `nx,ny,neta` to an arbitrary shape over the **same** physical extent (endpoints inclusive); overrides `spatial_factors`/`reduce`/`boundary` | `GetAtTimeStep` → `TrilinearInt` |
+
+Both **clamp at the edges** (no extrapolation) and interpolate **each field /
+channel independently**, exactly like X-SCAPE. Use these to re-grid to a
+non-integer-factor resolution (e.g. a power-of-two grid) or a different `dtau`
+consistently with the JETSCAPE pipeline. For plain down-resolution prefer
+block-mean — trilinear sampling does not average and so does not anti-alias.
+
 ---
 
 ## Tensor layout
@@ -63,6 +81,10 @@ python loc_libs/downsample.py data/dAu_25ev_mb.h5 -o data/dAu_xy.h5 \
 
 # source can be ROOT too (output is always HDF5 — the repo's fast-IO format)
 python loc_libs/downsample.py data/dAu_25ev_mb.root -o data/dAu_ds2.h5 --spatial-factor 2
+
+# X-SCAPE-style: trilinear-resample to 32x32x16 and linear-interp τ to dtau*1.5
+python loc_libs/downsample.py data/dAu_25ev_mb.h5 -o data/dAu_tri.h5 \
+       --spatial-target 32 32 16 --tau-stride 1.5 --tau-interp linear
 ```
 
 Equivalent Python:
@@ -86,7 +108,9 @@ is one chunk regardless of dataset size.
 | `-o, --output` | — | output `.h5` path (required) |
 | `--spatial-factor F` | — | one factor for `nx, ny, neta` |
 | `--spatial-factors FX FY FETA` | — | per-axis factors (use `1` to skip an axis) |
-| `--tau-stride K` | `1` | keep every K-th τ step (`dtau → K·dtau`); `1` = off |
+| `--spatial-target NX NY NETA` | — | trilinear-resample to this shape over the same extent (use `0` to keep an axis); overrides the factor flags |
+| `--tau-stride K` | `1` | τ stride (`dtau → K·dtau`); fractional allowed with `--tau-interp linear`; `1` = off |
+| `--tau-interp` | `skip` | `skip` (decimate, integer stride) \| `linear` (X-SCAPE `LinearInt`) |
 | `--reduce` | `mean` | spatial reduction: `mean` (block-average) \| `subsample` (strided) |
 | `--boundary` | `crop` | make spatial dims divisible: `crop` (trim) \| `pad` (pad up) |
 | `--pad-mode` | `edge` | `[--boundary pad]` `edge` \| `reflect` \| `zero` \| any `numpy.pad` mode |
@@ -103,11 +127,14 @@ Beyond the recomputed grid scalars (`nx/ny/neta`, `dx/dy/deta`, `x_min/y_min/eta
 self-describing:
 
 ```
-attrs:  downsample_spatial_factors=[2 2 2]  downsample_tau_stride=2
-        downsample_reduce='mean'  downsample_boundary='crop'  downsample_side='end'
+attrs:  downsample_spatial_method='mean'        # or 'subsample' / 'trilinear'
+        downsample_spatial_factors=[2 2 2]       # (block modes)
+        downsample_boundary='crop' side='end'    # (block modes)
+        downsample_spatial_target=[32 32 16]     # (trilinear mode)
+        downsample_tau_stride=2.0  downsample_tau_interp='skip'
         orig_nx=65  orig_ny=65  orig_neta=33  source_files=[...]
 data:   arr             (nevents, nFeatures, nx', ny', neta', ntau')
-        ntau_freezeout  recomputed to ceil(orig / tau_stride)
+        ntau_freezeout  recomputed to floor((orig-1)/tau_stride)+1
         tau_freezeout   unchanged (physical freeze-out time)
 ```
 
@@ -124,7 +151,9 @@ default**. Add a `downsample:` block to the config and it is applied to the lazy
 # train_torch/config_h5_sel.yaml
 downsample:
   spatial_factor: 2       # or: spatial_factors: [2, 2, 1]  to keep eta
-  tau_stride:     2       # keep every other τ step (K=1 = off)
+  #spatial_target: [32, 32, 16]  # trilinear resample instead (0 = keep axis); overrides factors
+  tau_stride:     2       # τ stride (K=1 = off; fractional ok with tau_interp: linear)
+  #tau_interp:    skip    # skip (decimate) | linear (X-SCAPE LinearInt)
   reduce:         mean    # mean | subsample
   boundary:       crop    # crop (default) | pad
   #pad_mode:      edge    # [boundary: pad] edge | reflect | zero | ...
@@ -164,9 +193,11 @@ training scripts do).
 
 | object | purpose |
 |---|---|
-| `downsample(arr, spatial_factors=1, tau_stride=1, reduce='mean', boundary='crop', pad_mode='edge', side='end')` | combined spatial coarsen + τ skip on a 5-D event or 6-D batch |
-| `downsample_spatial(arr, factors=2, ...)` | spatial coarsen only (`nx,ny,neta`) |
+| `downsample(arr, spatial_factors=1, tau_stride=1, reduce='mean', boundary='crop', pad_mode='edge', side='end', tau_interp='skip', spatial_target=None)` | combined spatial + τ downsample on a 5-D event or 6-D batch |
+| `downsample_spatial(arr, factors=2, ...)` | spatial block-coarsen only (`nx,ny,neta`) |
+| `resample_spatial(arr, target_shape, ...)` | trilinear resample `nx,ny,neta` to a shape (X-SCAPE `TrilinearInt`) |
 | `skip_tau(arr, stride, axis=-1)` | keep every k-th τ step (`arr[..., ::stride]`) |
+| `interp_tau(arr, stride, axis=-1)` | linear-interp τ to `stride·dtau` (X-SCAPE `LinearInt`; fractional ok) |
 | `coarsen_axis(arr, axis, factor, ...)` | single-axis primitive (pad/crop + mean/subsample) |
 | `downsampled_grid_params(grid, ...)` | recompute grid scalars for the coarse resolution |
 | `parse_downsample_cfg(cfg)` | turn a YAML `downsample:` block into kwargs (or `None`) |
@@ -186,10 +217,12 @@ For a spatial axis of length `L`, spacing `d`, origin `min`, factor `f`
 | `mean` + `crop` | `L // f` | `f·d` | `min + (f−1)/2·d` |
 | `mean` + `pad` | `⌈L/f⌉` | `f·d` | `min + (f−1)/2·d` |
 | `subsample` | `⌈L/f⌉` | `f·d` | `min` |
+| `spatial_target=N` (trilinear) | `N` | `d·(L−1)/(N−1)` | `min` (extent preserved) |
 
-τ skip by stride `k`: `ntau → ⌈ntau/k⌉`, `dtau → k·dtau`, `tau_min` unchanged,
-`ntau_freezeout → ⌈ntau_freezeout/k⌉`. (`side='both'` additionally shifts the
-origin by the front pad/crop offset.)
+τ by stride `k` (`skip` or `linear`): `ntau → floor((ntau−1)/k)+1`,
+`dtau → k·dtau`, `tau_min` unchanged,
+`ntau_freezeout → floor((ntau_freezeout−1)/k)+1` (= `⌈·/k⌉` for integer `k`).
+(`side='both'` additionally shifts the block-mode origin by the front offset.)
 
 ---
 

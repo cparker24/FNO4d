@@ -76,7 +76,9 @@ norm_chunk_size: 64       # [lazy, data-driven] events per chunk when computing 
 # and to bake a coarse copy to disk: python ../loc_libs/downsample.py --help
 #downsample:
 #  spatial_factor: 2       # halve nx, ny, neta   (or: spatial_factors: [2, 2, 1] to keep eta)
-#  tau_stride:     1       # keep every K-th tau step (raises effective dtau; K=1 = off)
+#  #spatial_target: [32, 32, 16]  # trilinear-resample instead (X-SCAPE; 0 = keep axis); overrides factors
+#  tau_stride:     1       # tau stride (raises effective dtau; K=1 = off; fractional ok with tau_interp: linear)
+#  #tau_interp:    skip    # skip (decimate, no interpolation) | linear (X-SCAPE LinearInt between steps)
 #  reduce:         mean    # mean (block-average) | subsample (strided pick)
 #  boundary:       crop    # default; crop (drop odd cells, e.g. 65->64->32) | pad (pad up to a multiple)
 #  #pad_mode:      edge    # [boundary: pad] edge | reflect | zero | ...
