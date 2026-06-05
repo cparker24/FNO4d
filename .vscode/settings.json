@@ -13,6 +13,13 @@
         "./loc_libs",
         "./neuralop_mlx",
         "./neuraloperator-4d-2.0.0"
+    ],
+    "python-envs.pythonProjects": [
+        {
+            "path": ".",
+            "envManager": "ms-python.python:conda",
+            "packageManager": "ms-python.python:conda"
+        }
     ]
 
 }
