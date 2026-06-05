@@ -70,6 +70,18 @@ normalization:
   # alpha: 1.0            # only used by cosh_etau75_3d
 norm_chunk_size: 64       # [lazy, data-driven] events per chunk when computing ref
 
+# --- spatial / temporal downsampling (optional) ----------------------------
+# Coarsen the grid BEFORE the xy/eta/tau slices below (the slices then act on
+# the coarsened grid).  Omit / comment out to disable.  See loc_libs/downsample.py
+# and to bake a coarse copy to disk: python ../loc_libs/downsample.py --help
+#downsample:
+#  spatial_factor: 2       # halve nx, ny, neta   (or: spatial_factors: [2, 2, 1] to keep eta)
+#  tau_stride:     1       # keep every K-th tau step (raises effective dtau; K=1 = off)
+#  reduce:         mean    # mean (block-average) | subsample (strided pick)
+#  boundary:       crop    # default; crop (drop odd cells, e.g. 65->64->32) | pad (pad up to a multiple)
+#  #pad_mode:      edge    # [boundary: pad] edge | reflect | zero | ...
+#  #side:          end     # end | both
+
 # --- data preparation ------------------------------------------------------
 train_ratio: 0.8
 xyslice:  [null, -1]      # slice(None, -1) — drop last spatial bin

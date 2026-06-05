@@ -77,6 +77,8 @@ from training_utils import (RunLog, patch_trainer_logging, patch_trainer_checkpo
 from parse_training_log import TrainingHistory
 from norm_utils import build_normalizer
 from fluid_datasets import FluidDatasetH5
+from downsample import (DownsampledArrayView, downsampled_grid_params,
+                        parse_downsample_cfg)
 
 # ---------------------------------------------------------------------------
 # GCS imports
@@ -120,6 +122,7 @@ train_ratio     = cfg.get('train_ratio', 0.8)
 xyslice         = _slice(cfg.get('xyslice',  [None, -1]))
 etaslice        = _slice(cfg.get('etaslice', [None, None]))
 tauslice        = _slice(cfg.get('tauslice', [None, -1]))
+downsample_kw   = parse_downsample_cfg(cfg.get('downsample'))  # None = off; coarsen before slicing
 lr              = cfg['lr']
 weight_decay    = cfg.get('weight_decay', 1e-4)
 test_batch_sizes = cfg.get('test_batch_sizes', [10])
@@ -234,6 +237,16 @@ arr         = dat['arr']
 grid_params = {k: dat[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta') if k in dat}
 del dat
 gc.collect()
+
+# Optional spatial/temporal downsampling — applied to the lazy/eager arr before
+# the xy/eta/tau slicing below, exactly like those slices act on the (now
+# coarsened) grid.  grid_params is updated so the Normalizer is built at the
+# matching resolution (deta/dtau/eta_min change; tau_min does not).  Works for
+# both lazy (MultiH5Array) and eager (ndarray) arr without an extra full copy.
+if downsample_kw:
+    arr         = DownsampledArrayView(arr, **downsample_kw)
+    grid_params = downsampled_grid_params(grid_params, **downsample_kw)
+    log(f'downsample:       {downsample_kw}')
 
 log(f'arr type:  {type(arr).__name__}')
 log(f'arr shape: {arr.shape}')

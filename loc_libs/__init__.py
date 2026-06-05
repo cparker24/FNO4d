@@ -6,6 +6,9 @@
 # -------
 # read_3d_root      – read 3-D ROOT files into numpy arrays (read_3d_data, coarsen_array)
 # read_3d_hdf5      – read HDF5 variants of the same format
+# downsample        – spatial coarsen (pad/crop) + tau skipping: write a coarse h5
+#                     (write_downsampled_h5 / CLI) or downsample lazily in the
+#                     DataLoader (DownsampledArrayView, parse_downsample_cfg)
 # datasets          – PyTorch Dataset classes (FluidDataset)
 # memory_utils      – process memory helpers (MemoryPrinter, calculate_model_memory)
 # training_utils    – training helpers (enable_log_tee, patch_trainer_checkpoint)
