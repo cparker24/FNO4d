@@ -76,7 +76,7 @@ from training_utils import (RunLog, patch_trainer_logging, patch_trainer_checkpo
                              save_last_checkpoint, save_embedding_grid)
 from parse_training_log import TrainingHistory
 from norm_utils import build_normalizer
-from fluid_datasets import FluidDatasetH5
+from fluid_datasets import FluidDatasetH5, worker_init_fn
 from downsample import (DownsampledArrayView, downsampled_grid_params,
                         parse_downsample_cfg)
 
@@ -320,7 +320,8 @@ train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True,
                           num_workers=_nw,
                           persistent_workers=_persist,
                           prefetch_factor=_prefetch,
-                          pin_memory=_pin)
+                          pin_memory=_pin,
+                          worker_init_fn=worker_init_fn)
 
 test_loaders = {}
 for res, test_bsize in zip(test_resolutions, test_batch_sizes):
@@ -331,7 +332,8 @@ for res, test_bsize in zip(test_resolutions, test_batch_sizes):
                                    num_workers=_nw,
                                    persistent_workers=_persist,
                                    prefetch_factor=_prefetch,
-                                   pin_memory=_pin)
+                                   pin_memory=_pin,
+                                   worker_init_fn=worker_init_fn)
 gc.collect()
 
 # ---------------------------------------------------------------------------

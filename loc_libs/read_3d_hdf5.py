@@ -270,12 +270,46 @@ class MultiH5Array:
     # ------------------------------------------------------------------ indexing
 
     def _open(self, fi):
-        """Return a cached h5py File handle for file index fi (per-process)."""
+        """Return a cached h5py File handle for file index fi.
+
+        The cache is keyed by os.getpid() so that a forked DataLoader worker
+        never reuses a handle opened in the parent process.  Sharing an h5py
+        File across fork() corrupts reads; with a pid-keyed cache each worker
+        transparently reopens its own handles on first access.
+        """
         if not hasattr(self, '_handles'):
             self._handles = {}
-        if fi not in self._handles:
-            self._handles[fi] = self._h5py.File(self._paths[fi], 'r')
-        return self._handles[fi]
+        cache = self._handles.setdefault(os.getpid(), {})
+        if fi not in cache:
+            cache[fi] = self._h5py.File(self._paths[fi], 'r')
+        return cache[fi]
+
+    def reset_handles(self):
+        """Drop cached file handles for the current process.
+
+        Used as a belt-and-suspenders measure from a DataLoader
+        worker_init_fn.  Handles inherited from the parent are simply dropped
+        (not closed) — closing would tear down the parent's still-open fds.
+        """
+        self._handles = {}
+
+    # ------------------------------------------------------------------ pickling
+    # The h5py module reference and any open File handles are not picklable, so
+    # they are excluded from the pickled state.  This lets the instance survive a
+    # DataLoader 'spawn' start method (the macOS default); the re-imported module
+    # and an empty handle cache are restored in the child, which then reopens its
+    # own handles lazily — same outcome as the pid-keyed cache under 'fork'.
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop('_h5py', None)
+        state.pop('_handles', None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        import h5py as _h5py
+        self._h5py = _h5py
+        self._handles = {}
 
     def __getitem__(self, idx):
         if isinstance(idx, (int, np.integer)):
