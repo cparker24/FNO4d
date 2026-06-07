@@ -583,6 +583,11 @@ class DownsampledArrayView:
         out = self._down(self._base[:])
         return out if dtype is None else out.astype(dtype, copy=False)
 
+    def reset_handles(self):
+        """Forward fork-safety handle reset to the wrapped base source."""
+        if hasattr(self._base, 'reset_handles'):
+            self._base.reset_handles()
+
 
 # ---------------------------------------------------------------------------
 # offline file writer:  h5 / root  ->  padded/cropped downsampled h5

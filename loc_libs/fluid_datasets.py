@@ -13,6 +13,29 @@ def _repeat_first_tau(ev, time_steps):
     return x, y
 
 
+def worker_init_fn(_worker_id):
+    """DataLoader worker init that drops any inherited lazy file handles.
+
+    h5py/uproot handles must not be shared across fork().  The lazy sources
+    (MultiH5Array, DownsampledArrayView) already key their handle cache by pid,
+    so a forked worker reopens its own handles transparently — this hook is a
+    belt-and-suspenders measure that clears any cache the worker inherited from
+    the parent process before the first read.
+
+    Pass as ``DataLoader(..., worker_init_fn=worker_init_fn)``.  Safe to use
+    with num_workers=0 (it is never called) and with eager ndarray sources
+    (which expose no reset_handles()).
+    """
+    info = torch.utils.data.get_worker_info()
+    if info is None:
+        return
+    src = getattr(info.dataset, 'data', None)
+    # unwrap DownsampledArrayView -> base, and reset both levels if present
+    for obj in (src, getattr(src, '_base', None)):
+        if obj is not None and hasattr(obj, 'reset_handles'):
+            obj.reset_handles()
+
+
 class _FluidDatasetBase(Dataset):
     """Shared logic for fluid-simulation datasets backed by a materialised ndarray.
 
