@@ -19,9 +19,18 @@ import argparse
 import yaml
 import sys
 import gc
+import multiprocessing as _mp
 from pathlib import Path
 from time import perf_counter
-from torch.utils.data import DataLoader   # used by both backends
+
+# DataLoader workers must use 'fork' (DATA_PIPELINE_PLAN.md §9): the lazy
+# sources key their handle cache by pid so a forked worker reopens its own
+# handles, and fork copies this already-running script instead of re-importing
+# it (which 'spawn' does — re-executing the whole training script per worker).
+try:
+    _mp.set_start_method('fork')
+except RuntimeError:
+    pass  # already set by an earlier import
 
 # ---------------------------------------------------------------------------
 # parse args and load config — before framework imports so backend is known
@@ -61,17 +70,11 @@ else:  # mlx
     from neuralop_mlx.utils import count_model_params
 
 sys.path.insert(0, '../loc_libs')
-from read_3d_root import read_3d_data
 from memory_utils import calculate_model_memory, reset_peak_memory, log_peak_memory
 from training_utils import (RunLog, patch_trainer_logging, patch_trainer_checkpoint,
                              save_last_checkpoint)
 from parse_training_log import TrainingHistory
-from norm_utils import build_normalizer
-
-if backend == 'torch':
-    from fluid_datasets import FluidDataset
-else:
-    from fluid_datasets import FluidDatasetMLX
+from data import RootSource, build_dataloaders
 
 # ---------------------------------------------------------------------------
 # GCS-specific imports
@@ -110,6 +113,14 @@ eval_interval   = cfg.get('eval_interval', 2)
 save_last       = cfg.get('save_last', True)
 model_dir       = cfg.get('model_dir', odir)
 norm_cfg        = cfg.get('normalization', {'name': 'none'})
+norm_chunk_size = cfg.get('norm_chunk_size', 64)
+
+# loader / downsample (DATA_PIPELINE_PLAN.md §11–§12)
+downsample_cfg  = cfg.get('downsample')
+loader_cfg      = cfg.get('loader', {}) or {}
+num_workers     = loader_cfg.get('num_workers', cfg.get('num_workers', 0))
+prefetch_factor = loader_cfg.get('prefetch_factor', 2)
+locality_block  = loader_cfg.get('locality_block')
 
 # local-only param
 input_dir = cfg.get('input_dir', '.')
@@ -187,8 +198,12 @@ log(f'Events called for {nevents_in}')
 if not input_files:
     raise ValueError("No data found in the specified input files.")
 
+# Build a lazy RootSource (DATA_PIPELINE_PLAN.md §5) for every data_source.
+# uproot streams gs:// / s3:// via fsspec storage_options, so gcs_stream needs
+# no download; gcs_download still copies locally first.
+storage_options = None
 if data_source == 'local':
-    arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, local_rank=None)
+    source_paths = [f'{input_dir}/{f}' for f in input_files]
 
 elif data_source == 'gcs_download':
     log(f'Downloading {len(input_files)} file(s) from GCS ...')
@@ -200,51 +215,20 @@ elif data_source == 'gcs_download':
     log(f'Download complete in {perf_counter() - t_dl:.1f}s')
     for gs_uri, local_path in zip(input_files, local_files):
         log(f'  {gs_uri}  →  {local_path}')
-    arr_data = read_3d_data(local_files, nevents=nevents_in, local_rank=None)
+    source_paths = local_files
 
 else:  # gcs_stream
     storage_options = get_gcs_storage_options(gcs_key_file)
-    arr_data = read_3d_data(input_files, nevents=nevents_in, local_rank=None, storage_options=storage_options)
+    source_paths = list(input_files)
 
-log('Data parameters from input file:')
-for key in arr_data.keys():
-    if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
-        log(f'  {key}: {arr_data[key]}')
+source = RootSource(source_paths, storage_options=storage_options)
+grid_params = dict(source.grid_params)
+log(f'RootSource: {source!r}')
+log(f'grid_params: {grid_params}')
 
-arr = arr_data['arr']
-arr = arr[:, :, xyslice, xyslice, etaslice, tauslice]
-
-grid_params = {k: arr_data[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
-del arr_data
-gc.collect()
-
-log(f'nevents (constrained by input file(s)): {arr.shape[0]}')
-test_resolutions = [arr.shape[2]]
-
-# ---------------------------------------------------------------------------
-# train / val split
-# ---------------------------------------------------------------------------
-n_train     = int(arr.shape[0] * train_ratio)
-data_train  = arr[:n_train]
-data_verify = arr[n_train:]
-del arr
-gc.collect()
-
-log(f'shapes train:  {data_train.shape}')
-log(f'shapes verify: {data_verify.shape}')
-
-# ---------------------------------------------------------------------------
-# normalisation  (fit on train only, apply to both splits)
-# ---------------------------------------------------------------------------
-normalizer = build_normalizer(norm_cfg, grid_params)
-log(f'normalizer:      {normalizer}')
-
-data_train  = normalizer.fit_transform(data_train)
-data_verify = normalizer.transform(data_verify)
-
-normalizer_path = f'{model_dir}/normalizer.npz'
-normalizer.save(normalizer_path)
-log(f'normalizer  →  {normalizer_path}')
+# nevents_in caps the number of events used (defaults to all).
+n_total = len(source) if nevents_in is None or nevents_in <= 0 else min(nevents_in, len(source))
+log(f'nevents (constrained by input file(s)): {n_total}')
 
 # ---------------------------------------------------------------------------
 # device
@@ -257,26 +241,32 @@ else:
     log(f'Using device: {device} (MLX Metal)')
 
 # ---------------------------------------------------------------------------
-# datasets and loaders
+# split + normalisation + datasets + loaders (single unified builder, §11)
 # ---------------------------------------------------------------------------
-if backend == 'torch':
-    dataset_train = FluidDataset(data_train)
-    dataset_test  = FluidDataset(data_verify)
-else:
-    dataset_train = FluidDatasetMLX(data_train)
-    dataset_test  = FluidDatasetMLX(data_verify)
+log(f'num_workers={num_workers}  prefetch_factor={prefetch_factor}  '
+    f'locality_block={locality_block}  downsample={bool(downsample_cfg)}')
 
-train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True)
+train_loader, test_loaders, normalizer = build_dataloaders(
+    source, n_total=n_total, train_ratio=train_ratio,
+    xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
+    norm_cfg=norm_cfg, grid_params=grid_params,
+    backend=backend, batch_size=batch_size, test_batch_sizes=test_batch_sizes,
+    num_workers=num_workers, prefetch_factor=prefetch_factor,
+    downsample_cfg=downsample_cfg, locality_block=locality_block,
+    norm_chunk_size=norm_chunk_size)
 
-test_loaders = {}
-for res, test_bsize in zip(test_resolutions, test_batch_sizes):
-    log(f'res {res}')
-    test_loaders[res] = DataLoader(dataset_test,
-                                   batch_size=test_bsize,
-                                   shuffle=False,
-                                   num_workers=0,
-                                   pin_memory=False,
-                                   persistent_workers=False)
+log(f'normalizer:      {normalizer}')
+if normalizer.ref is not None:
+    log(f'[norm] data-driven ref shape={normalizer.ref.shape}')
+
+normalizer_path = f'{model_dir}/normalizer.npz'
+normalizer.save(normalizer_path)
+log(f'normalizer  →  {normalizer_path}')
+
+test_resolutions = list(test_loaders.keys())
+_sample = next(iter(train_loader))
+log(f'batch x shape: {tuple(_sample["x"].shape)}  y shape: {tuple(_sample["y"].shape)}')
+del _sample
 gc.collect()
 
 # ---------------------------------------------------------------------------
