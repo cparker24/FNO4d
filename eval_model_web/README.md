@@ -55,6 +55,19 @@ the pipeline completes — no manual reload needed.
 If the pipeline fails the banner turns red and the full traceback appears in
 the log.  Fix the config or environment issue, then reload the page to retry.
 
+> **Maintenance note (2026-06-08):** `app.py` still carries its own
+> *self-contained* inference pipeline — a per-event loop plus an upfront
+> full-array `normalizer.transform` (its local `data_test_norm`).  The marimo
+> eval paths (`../eval_model/eval.py`, `eval_gcs_setup.py`) were migrated to a
+> batched `DataLoader` over the shared `loc_libs/data` pipeline (`FluidDataset`
+> \+ collate), which reuses the training first-tau-repeat windowing/normalizer
+> and batches the forward pass.  `app.py` was intentionally left unchanged then
+> and is now the last remaining copy of the old pattern (alongside the
+> standalone `eval_gcs.py` and `mlx_vs_torch_inf_test.py`).  Porting it to the
+> same batched path is a worthwhile future cleanup for speed and consistency —
+> verified equivalent (bit-identical pred/true) in the marimo migration — but
+> not required for the app to function.
+
 ## Config file
 
 The app reads the same `eval_gcs_config.yaml` as the marimo notebook.
