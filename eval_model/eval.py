@@ -208,15 +208,16 @@ def _(Normalizer, Path, data_test, model_dir_ui):
     model_dir = Path(model_dir_ui.value)
     norm_path = model_dir / 'normalizer.npz'
 
+    # Load the normalizer only — the per-batch collate applies it during
+    # inference, so we no longer materialise a full normalised copy of the
+    # test array here (keeps peak eval memory to one raw + pred + true set).
     if norm_path.exists():
-        normalizer     = Normalizer.load(str(norm_path))
-        data_test_norm = normalizer.transform(data_test)
+        normalizer = Normalizer.load(str(norm_path))
         print(f'Normalizer: {normalizer}')
     else:
-        normalizer     = None
-        data_test_norm = data_test
+        normalizer = None
         print('No normalizer.npz found — using raw data')
-    return data_test_norm, model_dir, normalizer
+    return model_dir, normalizer
 
 
 @app.cell
@@ -336,60 +337,69 @@ def _(
 
 
 @app.cell
-def _(backend, data_test_norm, device, model, normalizer, np):
+def _(backend, data_test, device, model, normalizer, np):
+    # Batched inference via the SHARED data pipeline (FluidDataset + collate).
+    # The collate builds the model input exactly as training does
+    # (first-tau-repeat) and applies the SAME normalizer, so eval preprocessing
+    # is bit-identical to the train path — no hand-rolled repeat/normalize here.
+    # shuffle=False keeps pred/true aligned with event order; num_workers=0
+    # because data_test is already an in-memory ndarray (workers would only add
+    # fork/IPC overhead).  Batching the forward pass replaces the old
+    # one-event-at-a-time loop, the main GPU-utilisation win on the eval path.
+    from data import FluidDataset, make_collate
+    from torch.utils.data import DataLoader
+
+    _BATCH = 8   # forward-pass batch size — tune to GPU memory
+
+    # Window length so the collate emits all post-IC steps: it builds
+    # x = repeat(IC, T-1) and y = steps 1..T-1.  data_test has full_T tau
+    # slices, so T = full_T gives full_T-1 output steps (IC excluded).
+    _T      = data_test.shape[-1]
+    _ds     = FluidDataset(data_test)                  # raw ndarray events
+    _loader = DataLoader(_ds, batch_size=_BATCH, shuffle=False, num_workers=0,
+                         collate_fn=make_collate(normalizer, _T, backend))
+
     if backend == 'torch':
         import torch as _torch
-        def _run_inference(mdl, data, dev):
-            preds = []
-            with _torch.no_grad():
-                for i in range(data.shape[0]):
-                    x0  = data[i, :, :, :, :, :1]
-                    T   = data.shape[-1] - 1
-                    x   = np.repeat(x0, T, axis=-1)
-                    xin = _torch.FloatTensor(x).unsqueeze(0).to(dev)
-                    out = mdl(xin).squeeze(0).cpu().numpy()
-                    preds.append(out)
-            return np.stack(preds)   # (N, C, nx, ny, neta, T)
-
-        model_out = _run_inference(model, data_test_norm, device)
-
-    else:  # mlx
-        import mlx.core as _mx
-        def _run_inference(mdl, data):
-            preds = []
-            for i in range(data.shape[0]):
-                x0  = data[i, :, :, :, :, :1].astype(np.float32)
-                T   = data.shape[-1] - 1
-                x   = np.repeat(x0, T, axis=-1)
-                xin = _mx.array(x[np.newaxis])
-                out = mdl(xin)
-                _mx.eval(out)
-                preds.append(np.array(out[0]))
-            return np.stack(preds)   # (N, C, nx, ny, neta, T)
-
-        model_out = _run_inference(model, data_test_norm)
-
-    print(f'Inference done: model_out shape {model_out.shape}')
-
-    if normalizer is not None:
-        x0_all         = data_test_norm[:, :, :, :, :, :1]
-        _model_full    = np.concatenate([x0_all, model_out], axis=-1)
-        model_out_phys = normalizer.inverse(_model_full)[:, :, :, :, :, 1:]
-        y_true_phys    = normalizer.inverse(data_test_norm)[:, :, :, :, :, 1:]
     else:
-        model_out_phys = model_out
-        y_true_phys    = data_test_norm[:, :, :, :, :, 1:]
+        import mlx.core as _mx
 
-    print(f'Physical shapes — pred: {model_out_phys.shape}, true: {y_true_phys.shape}')
+    _pred_phys, _true_phys = [], []
+    for _b in _loader:
+        _x, _y = _b['x'], _b['y']                      # normalised: x=IC-repeat, y=truth
+        if backend == 'torch':
+            with _torch.no_grad():
+                _out = model(_x.to(device)).cpu().numpy()
+            _x = _x.numpy(); _y = _y.numpy()
+        else:
+            _o = model(_mx.array(_x)); _mx.eval(_o)
+            _out = np.array(_o)                         # _x, _y already numpy
+
+        # x0 = first slice of the repeated input = the normalised initial
+        # condition; concat it back so normalizer.inverse sees the IC at
+        # tau-index 0 (its per-tau params line up), then strip the IC.
+        _x0 = _x[..., :1]
+        if normalizer is not None:
+            _pred_phys.append(normalizer.inverse(np.concatenate([_x0, _out], axis=-1))[..., 1:])
+            _true_phys.append(normalizer.inverse(np.concatenate([_x0, _y],   axis=-1))[..., 1:])
+        else:
+            _pred_phys.append(_out)
+            _true_phys.append(_y)
+
+    model_out_phys = np.concatenate(_pred_phys, axis=0)   # (N, C, nx, ny, neta, T)
+    y_true_phys    = np.concatenate(_true_phys, axis=0)
+
+    print(f'Batched inference done (batch={_BATCH}) — '
+          f'pred: {model_out_phys.shape}, true: {y_true_phys.shape}')
     return model_out_phys, y_true_phys
 
 
 @app.cell
-def _(data_test_norm, grid, np):
-    nx_eff   = data_test_norm.shape[2]
-    ny_eff   = data_test_norm.shape[3]
-    neta_eff = data_test_norm.shape[4]
-    ntau_out = data_test_norm.shape[5] - 1
+def _(data_test, grid, np):
+    nx_eff   = data_test.shape[2]
+    ny_eff   = data_test.shape[3]
+    neta_eff = data_test.shape[4]
+    ntau_out = data_test.shape[5] - 1
 
     x_min   = grid.get('x_min',   0.0);  dx   = grid.get('dx',   1.0)
     y_min   = grid.get('y_min',   0.0);  dy   = grid.get('dy',   1.0)
@@ -422,10 +432,10 @@ def _(data_test_norm, grid, np):
 
 
 @app.cell
-def _(data_test_norm, eval_mode, mo, neta_eff, train_cfg):
+def _(data_test, eval_mode, mo, neta_eff, train_cfg):
     _norm      = train_cfg.get('normalization', {})
     _norm_name = _norm.get('name', 'none') if isinstance(_norm, dict) else str(_norm)
-    _n_test    = data_test_norm.shape[0]
+    _n_test    = data_test.shape[0]
 
     # basic / metric controls
     event_ui          = mo.ui.number(value=0, start=0, step=1,

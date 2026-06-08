@@ -37,7 +37,7 @@ class EvalContext:
     eval_cfg:       dict
     train_cfg:      dict
     backend:        str            # 'torch' | 'mlx'
-    data_test_norm: np.ndarray
+    data_test:      np.ndarray     # raw (unnormalised) test events
     normalizer:     Any            # Normalizer | None
     model_out_phys: np.ndarray
     y_true_phys:    np.ndarray
@@ -316,7 +316,13 @@ def load_data(eval_cfg: dict, gcs_fs, gcs_key: Optional[str],
 # Stage 6: normalizer
 # ---------------------------------------------------------------------------
 
-def load_normalizer(eval_cfg: dict, gcs_fs, model_dir_resolved: str, data_test):
+def load_normalizer(eval_cfg: dict, gcs_fs, model_dir_resolved: str):
+    """Load the normalizer only — no full-array transform.
+
+    The per-batch collate in :func:`run_inference` applies the normalizer
+    during inference, so we no longer materialise a full normalised copy of the
+    test array here (keeps peak eval memory to one raw + pred + true set).
+    """
     from norm_utils import Normalizer
 
     model_access = eval_cfg.get('model_access', 'local')
@@ -339,14 +345,12 @@ def load_normalizer(eval_cfg: dict, gcs_fs, model_dir_resolved: str, data_test):
             norm_local = None
 
     if norm_local is not None and norm_local.exists():
-        normalizer     = Normalizer.load(str(norm_local))
-        data_test_norm = normalizer.transform(data_test)
+        normalizer = Normalizer.load(str(norm_local))
         print(f'Normalizer: {normalizer}')
     else:
-        normalizer     = None
-        data_test_norm = data_test
+        normalizer = None
         print('No normalizer found — using raw data')
-    return data_test_norm, normalizer
+    return normalizer
 
 
 # ---------------------------------------------------------------------------
@@ -483,53 +487,61 @@ def load_model(eval_cfg: dict, gcs_fs, model_dir_resolved: str, train_cfg: dict)
 # Stage 8: inference
 # ---------------------------------------------------------------------------
 
-def run_inference(model, backend: str, device, data_test_norm: np.ndarray, normalizer):
+def run_inference(model, backend: str, device, data_test: np.ndarray, normalizer,
+                  batch_size: int = 8):
+    """Batched inference via the SHARED data pipeline (FluidDataset + collate).
+
+    The collate builds the model input exactly as training does (first-tau
+    repeat) and applies the SAME normalizer, so eval preprocessing is
+    bit-identical to the train path — no hand-rolled repeat/normalize here.
+    Batching the forward pass replaces the old one-event-at-a-time loop (the
+    main GPU-utilisation win).  ``shuffle=False`` keeps pred/true aligned with
+    event order; ``num_workers=0`` because ``data_test`` is already an in-memory
+    ndarray (workers would only add fork/IPC overhead).
+    """
+    from data import FluidDataset, make_collate
+    from torch.utils.data import DataLoader
+
+    # Window length so the collate emits all post-IC steps: it builds
+    # x = repeat(IC, T-1) and y = steps 1..T-1.  data_test has full_T tau
+    # slices, so T = full_T gives full_T-1 output steps (IC excluded).
+    T      = data_test.shape[-1]
+    ds     = FluidDataset(data_test)                   # raw ndarray events
+    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0,
+                        collate_fn=make_collate(normalizer, T, backend))
+
     if backend == 'torch':
         import torch
-
-        def _infer(mdl, data, dev):
-            preds = []
-            with torch.no_grad():
-                for i in range(data.shape[0]):
-                    x0  = data[i, :, :, :, :, :1]
-                    T   = data.shape[-1] - 1
-                    x   = np.repeat(x0, T, axis=-1)
-                    xin = torch.FloatTensor(x).unsqueeze(0).to(dev)
-                    out = mdl(xin).squeeze(0).cpu().numpy()
-                    preds.append(out)
-            return np.stack(preds)
-
-        model_out = _infer(model, data_test_norm, device)
-
-    else:  # mlx
+    else:
         import mlx.core as mx
 
-        def _infer(mdl, data):
-            preds = []
-            for i in range(data.shape[0]):
-                x0  = data[i, :, :, :, :, :1].astype(np.float32)
-                T   = data.shape[-1] - 1
-                x   = np.repeat(x0, T, axis=-1)
-                xin = mx.array(x[np.newaxis])
-                out = mdl(xin)
-                mx.eval(out)
-                preds.append(np.array(out[0]))
-            return np.stack(preds)
+    pred_phys, true_phys = [], []
+    for b in loader:
+        x, y = b['x'], b['y']                          # normalised: x=IC-repeat, y=truth
+        if backend == 'torch':
+            with torch.no_grad():
+                out = model(x.to(device)).cpu().numpy()
+            x = x.numpy(); y = y.numpy()
+        else:
+            o = model(mx.array(x)); mx.eval(o)
+            out = np.array(o)                          # x, y already numpy
 
-        model_out = _infer(model, data_test_norm)
+        # x0 = first slice of the repeated input = the normalised initial
+        # condition; concat it back so normalizer.inverse sees the IC at
+        # tau-index 0 (its per-tau params line up), then strip the IC.
+        x0 = x[..., :1]
+        if normalizer is not None:
+            pred_phys.append(normalizer.inverse(np.concatenate([x0, out], axis=-1))[..., 1:])
+            true_phys.append(normalizer.inverse(np.concatenate([x0, y],   axis=-1))[..., 1:])
+        else:
+            pred_phys.append(out)
+            true_phys.append(y)
 
-    print(f'Inference done: model_out shape {model_out.shape}')
+    model_out_phys = np.concatenate(pred_phys, axis=0)   # (N, C, nx, ny, neta, T)
+    y_true_phys    = np.concatenate(true_phys, axis=0)
 
-    if normalizer is not None:
-        x0_all         = data_test_norm[:, :, :, :, :, :1]
-        model_full     = np.concatenate([x0_all, model_out], axis=-1)
-        model_out_phys = normalizer.inverse(model_full)[:, :, :, :, :, 1:]
-        y_true_phys    = normalizer.inverse(data_test_norm)[:, :, :, :, :, 1:]
-    else:
-        model_out_phys = model_out
-        y_true_phys    = data_test_norm[:, :, :, :, :, 1:]
-
-    print(f'Physical shapes — pred: {model_out_phys.shape}, true: {y_true_phys.shape}')
+    print(f'Batched inference done (batch={batch_size}) — '
+          f'pred: {model_out_phys.shape}, true: {y_true_phys.shape}')
     return model_out_phys, y_true_phys
 
 
@@ -537,17 +549,17 @@ def run_inference(model, backend: str, device, data_test_norm: np.ndarray, norma
 # Stage 9: grid coordinates
 # ---------------------------------------------------------------------------
 
-def compute_grid_coords(data_test_norm: np.ndarray, grid: dict) -> dict:
-    neta_eff = data_test_norm.shape[4]
-    ntau_out = data_test_norm.shape[5] - 1
+def compute_grid_coords(data_test: np.ndarray, grid: dict) -> dict:
+    neta_eff = data_test.shape[4]
+    ntau_out = data_test.shape[5] - 1
 
     x_min   = grid.get('x_min',   0.0);  dx   = grid.get('dx',   1.0)
     y_min   = grid.get('y_min',   0.0);  dy   = grid.get('dy',   1.0)
     eta_min = grid.get('eta_min', 0.0);  deta = grid.get('deta', 1.0)
     tau_min = grid.get('tau_min', 0.6);  dtau = grid.get('dtau', 0.1)
 
-    x_coords       = x_min   + np.arange(data_test_norm.shape[2]) * dx
-    y_coords       = y_min   + np.arange(data_test_norm.shape[3]) * dy
+    x_coords       = x_min   + np.arange(data_test.shape[2]) * dx
+    y_coords       = y_min   + np.arange(data_test.shape[3]) * dy
     eta_coords     = eta_min + np.arange(neta_eff) * deta
     tau_out_coords = tau_min + (np.arange(ntau_out) + 1) * dtau
     xy_extent      = [x_coords[0] - dx/2, x_coords[-1] + dx/2,
@@ -576,16 +588,18 @@ def run_all(cfg_path: Optional[str] = None) -> EvalContext:
     train_cfg          = load_train_config(eval_cfg, gcs_fs, gcs_key)
     model_dir_resolved = resolve_model_dir(eval_cfg, gcs_fs, gcs_key)
     data_test, grid    = load_data(eval_cfg, gcs_fs, gcs_key, storage_opts, train_cfg)
-    data_test_norm, normalizer = load_normalizer(eval_cfg, gcs_fs, model_dir_resolved, data_test)
+    normalizer         = load_normalizer(eval_cfg, gcs_fs, model_dir_resolved)
     model, device, backend     = load_model(eval_cfg, gcs_fs, model_dir_resolved, train_cfg)
-    model_out_phys, y_true_phys = run_inference(model, backend, device, data_test_norm, normalizer)
-    coords = compute_grid_coords(data_test_norm, grid)
+    batch_size         = int(eval_cfg.get('eval_batch_size', 8))
+    model_out_phys, y_true_phys = run_inference(
+        model, backend, device, data_test, normalizer, batch_size)
+    coords = compute_grid_coords(data_test, grid)
 
     return EvalContext(
         eval_cfg=eval_cfg,
         train_cfg=train_cfg,
         backend=backend,
-        data_test_norm=data_test_norm,
+        data_test=data_test,
         normalizer=normalizer,
         model_out_phys=model_out_phys,
         y_true_phys=y_true_phys,

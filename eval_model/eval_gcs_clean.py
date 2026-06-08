@@ -50,7 +50,7 @@ def _(mo):
     eval_cfg       = _ctx.eval_cfg
     train_cfg      = _ctx.train_cfg
     backend        = _ctx.backend
-    data_test_norm = _ctx.data_test_norm
+    data_test      = _ctx.data_test
     model_out_phys = _ctx.model_out_phys
     y_true_phys    = _ctx.y_true_phys
     eta_coords     = _ctx.eta_coords
@@ -64,7 +64,7 @@ def _(mo):
     ntau_out       = _ctx.ntau_out
     return (
         backend,
-        data_test_norm,
+        data_test,
         dtau,
         eta_coords,
         eval_cfg,
@@ -87,10 +87,10 @@ def _(mo):
 # UI — create all widgets (no .value access in this cell)
 # ---------------------------------------------------------------------------
 @app.cell
-def _(data_test_norm, eval_cfg, mo, neta_eff, train_cfg):
+def _(data_test, eval_cfg, mo, neta_eff, train_cfg):
     _norm     = train_cfg.get('normalization', {})
     norm_name = _norm.get('name', 'none') if isinstance(_norm, dict) else str(_norm)
-    _n_test        = data_test_norm.shape[0]
+    _n_test        = data_test.shape[0]
     _default_mode  = eval_cfg.get('eval_mode', 'basic')
     _default_thresh = float(eval_cfg.get('active_threshold', 0.3))
 
