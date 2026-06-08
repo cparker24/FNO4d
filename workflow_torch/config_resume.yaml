@@ -1,0 +1,64 @@
+# ---------------------------------------------------------------------------
+# workflow_torch/resume.py config — resume from a checkpoint.
+#
+#   python resume.py --config config_resume.yaml
+#
+# All data / model / optimizer keys must match the original run (config.yaml).
+# Only the resume-specific block below is new.  The normalizer is loaded from
+# the checkpoint directory and reused verbatim.
+# ---------------------------------------------------------------------------
+
+# --- resume control --------------------------------------------------------
+total_epochs: 5                 # final epoch target; remaining = total - resume_epoch
+resume_model_source: local      # local | gcs_download
+resume_model_dir:  ./checkpoints  # dir holding the saved checkpoint (default: model_dir)
+checkpoint_type:   last         # last | periodic
+# checkpoint_epoch: 50          # [periodic] epoch N of checkpoint_N/ subdir
+# local_model_cache: ./cache/checkpoints   # [gcs_download] download target
+
+# --- mode selection (must match the original run) --------------------------
+data_source: local
+
+# --- output ----------------------------------------------------------------
+odir:      ./out
+model_dir: ./checkpoints
+
+# --- input data ------------------------------------------------------------
+input_dir: ../data
+input_files:
+  - dAu_25ev_mb.h5
+nevents_in: 10
+start_event: 0
+lazy: true
+
+# --- normalisation (norm_cfg only used if the checkpoint has no normalizer.npz)
+normalization:
+  name: none
+norm_chunk_size: 64
+
+# --- data preparation (must match the original run) ------------------------
+train_ratio: 0.8
+xyslice:  [null, -1]
+etaslice: [null, -1]
+tauslice: [null, null]
+
+# --- model (must match the checkpoint architecture) ------------------------
+model_type: fno
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]
+
+# --- training --------------------------------------------------------------
+batch_size: 1
+checkpoint_freq: null
+min_save_epoch:  null
+save_last: true
+eval_interval: 2
+test_batch_sizes: [2]
+
+loader:
+  num_workers: 4
+  prefetch_factor: 2
+
+lr: 8.0e-3
+weight_decay: 1.0e-4
+log_directly: true

@@ -114,7 +114,7 @@ class BlockBatchSampler(Sampler):
 def build_dataloaders(source, *, n_total, train_ratio, xyslice, etaslice, tauslice,
                       norm_cfg, grid_params, backend, batch_size, test_batch_sizes,
                       num_workers=0, prefetch_factor=2, downsample_cfg=None,
-                      locality_block=None, norm_chunk_size=64):
+                      locality_block=None, norm_chunk_size=64, normalizer=None):
     """Build (train_loader, test_loaders, normalizer) for any backend/source.
 
     Used by both torch and MLX: workers do the I/O and the collate returns
@@ -125,6 +125,12 @@ def build_dataloaders(source, *, n_total, train_ratio, xyslice, etaslice, tausli
     §11–§12.  ``downsample_cfg`` (a YAML ``downsample`` mapping) is auto-applied
     here and the coarse grid is auto-derived — removing the manual
     "recompute coarse grid params" trap.
+
+    ``normalizer`` — pass an already-built (and, for data-driven variants,
+    already-fitted) Normalizer to use it verbatim instead of building one from
+    ``norm_cfg``.  Used by the resume path to reuse the checkpoint's
+    ``normalizer.npz`` rather than refitting on the train split.  ``None``
+    (default) builds + fits from ``norm_cfg`` as before.
     """
     # 1) optional downsample wrap — auto-bind the coarse grid
     dkw = parse_downsample_cfg(downsample_cfg)
@@ -135,11 +141,14 @@ def build_dataloaders(source, *, n_total, train_ratio, xyslice, etaslice, tausli
     # 2) split (index remap; no array copies)
     n_train = int(n_total * train_ratio)
 
-    # 3) normalizer (+ chunked fit on the train range for data-driven variants)
-    normalizer = build_normalizer(norm_cfg, grid_params)
-    if normalizer.name in _DATA_DRIVEN:
-        normalizer.fit_lazy(source, n_train, xyslice, etaslice, tauslice,
-                            chunk_size=norm_chunk_size)
+    # 3) normalizer (+ chunked fit on the train range for data-driven variants).
+    #    A caller-supplied normalizer (e.g. loaded from a checkpoint) is used
+    #    as-is — no rebuild, no refit.
+    if normalizer is None:
+        normalizer = build_normalizer(norm_cfg, grid_params)
+        if normalizer.name in _DATA_DRIVEN:
+            normalizer.fit_lazy(source, n_train, xyslice, etaslice, tauslice,
+                                chunk_size=norm_chunk_size)
 
     # 4) datasets (raw reads) + collate
     train_ds = FluidDataset(source, np.arange(n_train),          xyslice, etaslice, tauslice)

@@ -21,7 +21,7 @@ as :data:`FluidDatasetEager`.
 """
 
 from .sources import (ArraySource, RootSource, ZarrSource,
-                      MultiH5Array, DownsampledArrayView)
+                      MultiH5Array, DownsampledArrayView, build_source)
 from .dataset import FluidDataset
 from .collate import make_collate
 from .loader import build_dataloaders, BlockBatchSampler, worker_init_fn
@@ -34,7 +34,7 @@ from fluid_datasets import FluidDataset as FluidDatasetEager
 
 __all__ = [
     'ArraySource', 'RootSource', 'ZarrSource',
-    'MultiH5Array', 'DownsampledArrayView',
+    'MultiH5Array', 'DownsampledArrayView', 'build_source',
     'FluidDataset', 'make_collate',
     'build_dataloaders', 'BlockBatchSampler', 'worker_init_fn',
     # legacy

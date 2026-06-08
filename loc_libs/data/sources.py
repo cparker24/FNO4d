@@ -17,6 +17,7 @@ Optionally it may expose ``reset_handles()`` for multi-worker fork-safety
 """
 
 import os
+from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -69,6 +70,98 @@ def _range(idx, total):
                              "use a BlockBatchSampler for batched reads")
         return start, max(start, stop), False
     raise TypeError(f"unsupported index type {type(idx).__name__!r} for RootSource")
+
+
+# ---------------------------------------------------------------------------
+# build_source — one factory for .root and .h5 inputs
+# ---------------------------------------------------------------------------
+_H5_EXTS   = ('.h5', '.hdf5')
+_ROOT_EXTS = ('.root',)
+
+
+def _classify_paths(paths):
+    """Return 'root' or 'h5' for a homogeneous path list (raises if mixed)."""
+    kinds = set()
+    for p in paths:
+        suf = Path(str(p)).suffix.lower()
+        if suf in _ROOT_EXTS:
+            kinds.add('root')
+        elif suf in _H5_EXTS:
+            kinds.add('h5')
+        else:
+            raise ValueError(
+                f"Cannot infer input type from extension: {p!r}. "
+                f"Expected one of {_ROOT_EXTS + _H5_EXTS}.")
+    if len(kinds) != 1:
+        raise ValueError(f"Mixed input file types {kinds} — all paths must be "
+                         "the same type (all .root or all .h5/.hdf5).")
+    return kinds.pop()
+
+
+def build_source(paths, *, storage_options=None, lazy=True, start_event=0,
+                 nevents=-1, choose_ntau=None, verbose=False):
+    """Build the right :class:`ArraySource` for ``.root`` or ``.h5`` inputs.
+
+    The unified pipeline (``build_dataloaders``) accepts any ArraySource, so the
+    only thing that differs between ROOT and HDF5 input is how the source is
+    constructed — this factory hides that behind a single call.
+
+    The file type is inferred from the extension (all paths must match):
+      * ``.root``        -> :class:`RootSource` (lazy; supports ``gs://``
+        streaming via ``storage_options``).
+      * ``.h5``/``.hdf5`` -> ``read_3d_data_hdf5(..., lazy=lazy)`` ->
+        :class:`MultiH5Array` (lazy) or a dense ``np.ndarray`` (eager).
+
+    Parameters
+    ----------
+    paths           : str | list[str]
+        Local path(s) or ``gs://`` URI(s).  ROOT streams remotely; HDF5 must be
+        downloaded to local paths first (h5py limitation).
+    storage_options : dict | None
+        Forwarded to ``uproot.open`` for remote ROOT files.
+    lazy            : bool
+        HDF5 only — on-demand per-event reads (True) vs. load-all (False).
+        Ignored for ROOT (always lazy).
+    start_event     : int
+        HDF5 only — first global event index across the concatenated files.
+    nevents         : int
+        HDF5 only — cap on events read (-1 = all).  For ROOT, cap via the
+        ``n_total`` argument to ``build_dataloaders`` instead.
+    choose_ntau     : int | None
+        ROOT only — pad/clip the tau axis (None -> global max ntau_freezeout).
+    verbose         : bool
+        HDF5 only — forwarded to ``read_3d_data_hdf5``.
+
+    Returns
+    -------
+    (source, grid_params) : tuple[ArraySource, dict]
+        ``grid_params`` holds the ``tau_min, dtau, eta_min, deta`` (and, for
+        HDF5, ``x_min, dx, y_min, dy``) consumed by the normalizer / downsample
+        / coordinate helpers.
+    """
+    if isinstance(paths, (str, os.PathLike)):
+        paths = [str(paths)]
+    else:
+        paths = [str(p) for p in paths]
+    if not paths:
+        raise ValueError("build_source requires at least one file path")
+
+    kind = _classify_paths(paths)
+
+    if kind == 'root':
+        source = RootSource(paths, storage_options=storage_options,
+                            choose_ntau=choose_ntau)
+        return source, dict(source.grid_params)
+
+    # h5 / hdf5
+    from read_3d_hdf5 import read_3d_data_hdf5
+    h5_arg = paths if len(paths) > 1 else paths[0]
+    dat = read_3d_data_hdf5(h5_arg, nevents=nevents, start_event=start_event,
+                            lazy=lazy, verbose=verbose)
+    grid_params = {k: dat[k] for k in
+                   ('tau_min', 'dtau', 'eta_min', 'deta', 'x_min', 'dx', 'y_min', 'dy')
+                   if k in dat}
+    return dat['arr'], grid_params
 
 
 # ---------------------------------------------------------------------------

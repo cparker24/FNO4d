@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# workflow_torch/evaluate.py config — evaluate a trained checkpoint.
+#
+#   python evaluate.py --config config_eval.yaml
+#
+# The model architecture and data slicing/normalization/downsample are read
+# from train_config (the run's training config), so they always match the
+# trained model.  Only eval-specific knobs live here.
+# ---------------------------------------------------------------------------
+
+# --- what to evaluate ------------------------------------------------------
+train_config: ./config.yaml     # the run's training config (architecture + data prep)
+model_dir:    ./checkpoints     # checkpoint dir (default: train_config's model_dir)
+checkpoint_type:  best          # best | last | checkpoint_N
+# checkpoint_epoch: 50          # [checkpoint_N] epoch number of checkpoint_N/ subdir
+
+# --- data ------------------------------------------------------------------
+data_source: local              # local | gcs_download
+use_train_split: true           # true = score the held-out val split of the training files
+# eval_input_files:             # OR point at separate eval files (any .h5 or .root)
+#   - dAu_holdout.h5
+# eval_input_dir: ../data
+nevents: -1                     # cap events read (-1 = all)
+# local_data_dir: ./cache/eval_data   # [gcs_download] download target
+# gcs_key_file: ./fnotest-wayne-gcs.json
+
+# --- metrics / inference ---------------------------------------------------
+active_threshold: 0.3           # ε mask (GeV/fm³) for normalized metrics; 0 = off
+eval_batch_size: 8              # inference forward-pass batch size
+metric_backend: numpy           # numpy | torch (torch = GPU-accelerated FFT metrics)
+
+# --- output ----------------------------------------------------------------
+odir: ./out_eval                # metrics_eval.json + dashboard.png + nrmse_heatmap.png
+save_figures: true

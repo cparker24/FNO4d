@@ -1,0 +1,68 @@
+# ---------------------------------------------------------------------------
+# workflow_torch/train.py config — ROOT input example.
+#
+#   python train.py --config config_root.yaml
+#
+# Identical to config.yaml except input_files point at .root files.  ROOT is
+# the only input type that supports data_source: gcs_stream (uproot streams
+# gs:// via fsspec; no local download needed).
+# ---------------------------------------------------------------------------
+
+# --- mode selection --------------------------------------------------------
+data_source: local        # local | gcs_download | gcs_stream
+
+# --- output ----------------------------------------------------------------
+odir:      ./out_root
+model_dir: ./checkpoints_root
+
+# --- input data (ROOT) -----------------------------------------------------
+input_dir: ../data
+input_files:
+  - dAu_25ev_mb.root
+  # - gs://test_fno/dAu_25ev_mb.root   # [gcs_download / gcs_stream]
+
+nevents_in:  10           # events to use (-1 = all); applied via n_total
+choose_ntau: null         # [ROOT] pad/clip tau axis (null = global max ntau_freezeout)
+lazy: true                # ROOT is always lazy; kept for symmetry
+
+# --- GCS [download / stream] -----------------------------------------------
+gcs_key_file: ./fnotest-wayne-gcs.json
+local_data_dir:    ../data
+overwrite_cache:   false
+gcs_show_progress: false
+# gcs_output_prefix: gs://test_fno/runs/run_root
+
+# --- normalisation ---------------------------------------------------------
+normalization:
+  name: none
+norm_chunk_size: 64
+
+# --- data preparation ------------------------------------------------------
+train_ratio: 0.8
+xyslice:  [null, -1]
+etaslice: [null, -1]
+tauslice: [null, null]
+
+# --- model -----------------------------------------------------------------
+model_type: fno
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]
+
+# --- training --------------------------------------------------------------
+n_epochs: 1
+batch_size: 1
+checkpoint_freq: null
+min_save_epoch:  null
+save_last: true
+eval_interval: 2
+test_batch_sizes: [2]
+
+# --- loader ----------------------------------------------------------------
+loader:
+  num_workers: 4
+  prefetch_factor: 2
+
+# --- optimizer / logging ---------------------------------------------------
+lr: 8.0e-3
+weight_decay: 1.0e-4
+log_directly: true

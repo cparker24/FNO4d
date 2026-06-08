@@ -484,97 +484,36 @@ def load_model(eval_cfg: dict, gcs_fs, model_dir_resolved: str, train_cfg: dict)
 
 
 # ---------------------------------------------------------------------------
-# Stage 8: inference
+# Stages 8–9: inference + grid coordinates
 # ---------------------------------------------------------------------------
+# Both are shared, backend-agnostic helpers and now live in loc_libs/eval.py so
+# the workflow_torch CLI and the eval notebooks use one implementation.  Thin
+# wrappers below keep run_all()'s call sites and console output unchanged.
+
+from eval import run_inference as _run_inference_impl
+from eval import compute_grid_coords as _compute_grid_coords_impl
+
 
 def run_inference(model, backend: str, device, data_test: np.ndarray, normalizer,
                   batch_size: int = 8):
-    """Batched inference via the SHARED data pipeline (FluidDataset + collate).
-
-    The collate builds the model input exactly as training does (first-tau
-    repeat) and applies the SAME normalizer, so eval preprocessing is
-    bit-identical to the train path — no hand-rolled repeat/normalize here.
-    Batching the forward pass replaces the old one-event-at-a-time loop (the
-    main GPU-utilisation win).  ``shuffle=False`` keeps pred/true aligned with
-    event order; ``num_workers=0`` because ``data_test`` is already an in-memory
-    ndarray (workers would only add fork/IPC overhead).
-    """
-    from data import FluidDataset, make_collate
-    from torch.utils.data import DataLoader
-
-    # Window length so the collate emits all post-IC steps: it builds
-    # x = repeat(IC, T-1) and y = steps 1..T-1.  data_test has full_T tau
-    # slices, so T = full_T gives full_T-1 output steps (IC excluded).
-    T      = data_test.shape[-1]
-    ds     = FluidDataset(data_test)                   # raw ndarray events
-    loader = DataLoader(ds, batch_size=batch_size, shuffle=False, num_workers=0,
-                        collate_fn=make_collate(normalizer, T, backend))
-
-    if backend == 'torch':
-        import torch
-    else:
-        import mlx.core as mx
-
-    pred_phys, true_phys = [], []
-    for b in loader:
-        x, y = b['x'], b['y']                          # normalised: x=IC-repeat, y=truth
-        if backend == 'torch':
-            with torch.no_grad():
-                out = model(x.to(device)).cpu().numpy()
-            x = x.numpy(); y = y.numpy()
-        else:
-            o = model(mx.array(x)); mx.eval(o)
-            out = np.array(o)                          # x, y already numpy
-
-        # x0 = first slice of the repeated input = the normalised initial
-        # condition; concat it back so normalizer.inverse sees the IC at
-        # tau-index 0 (its per-tau params line up), then strip the IC.
-        x0 = x[..., :1]
-        if normalizer is not None:
-            pred_phys.append(normalizer.inverse(np.concatenate([x0, out], axis=-1))[..., 1:])
-            true_phys.append(normalizer.inverse(np.concatenate([x0, y],   axis=-1))[..., 1:])
-        else:
-            pred_phys.append(out)
-            true_phys.append(y)
-
-    model_out_phys = np.concatenate(pred_phys, axis=0)   # (N, C, nx, ny, neta, T)
-    y_true_phys    = np.concatenate(true_phys, axis=0)
-
+    """Batched inference (loc_libs/eval.run_inference) with a progress print."""
+    model_out_phys, y_true_phys = _run_inference_impl(
+        model, backend, device, data_test, normalizer, batch_size=batch_size)
     print(f'Batched inference done (batch={batch_size}) — '
           f'pred: {model_out_phys.shape}, true: {y_true_phys.shape}')
     return model_out_phys, y_true_phys
 
 
-# ---------------------------------------------------------------------------
-# Stage 9: grid coordinates
-# ---------------------------------------------------------------------------
-
 def compute_grid_coords(data_test: np.ndarray, grid: dict) -> dict:
-    neta_eff = data_test.shape[4]
-    ntau_out = data_test.shape[5] - 1
-
-    x_min   = grid.get('x_min',   0.0);  dx   = grid.get('dx',   1.0)
-    y_min   = grid.get('y_min',   0.0);  dy   = grid.get('dy',   1.0)
-    eta_min = grid.get('eta_min', 0.0);  deta = grid.get('deta', 1.0)
-    tau_min = grid.get('tau_min', 0.6);  dtau = grid.get('dtau', 0.1)
-
-    x_coords       = x_min   + np.arange(data_test.shape[2]) * dx
-    y_coords       = y_min   + np.arange(data_test.shape[3]) * dy
-    eta_coords     = eta_min + np.arange(neta_eff) * deta
-    tau_out_coords = tau_min + (np.arange(ntau_out) + 1) * dtau
-    xy_extent      = [x_coords[0] - dx/2, x_coords[-1] + dx/2,
-                      y_coords[0] - dy/2, y_coords[-1] + dy/2]
-
-    print(f'Grid  x: [{x_coords[0]:.2f}, {x_coords[-1]:.2f}] fm  '
-          f'y: [{y_coords[0]:.2f}, {y_coords[-1]:.2f}] fm')
-    print(f'      η: [{eta_coords[0]:.2f}, {eta_coords[-1]:.2f}]  '
-          f'τ_out: [{tau_out_coords[0]:.3f}, {tau_out_coords[-1]:.3f}] fm/c')
-
-    return dict(
-        eta_coords=eta_coords, tau_out_coords=tau_out_coords,
-        x_coords=x_coords, y_coords=y_coords, xy_extent=xy_extent,
-        dtau=dtau, tau_min=tau_min, neta_eff=neta_eff, ntau_out=ntau_out,
-    )
+    """Physical grid coordinates (loc_libs/eval.compute_grid_coords) + summary print."""
+    coords = _compute_grid_coords_impl(data_test, grid)
+    xc, yc, ec, tc = (coords['x_coords'], coords['y_coords'],
+                      coords['eta_coords'], coords['tau_out_coords'])
+    print(f'Grid  x: [{xc[0]:.2f}, {xc[-1]:.2f}] fm  '
+          f'y: [{yc[0]:.2f}, {yc[-1]:.2f}] fm')
+    print(f'      η: [{ec[0]:.2f}, {ec[-1]:.2f}]  '
+          f'τ_out: [{tc[0]:.3f}, {tc[-1]:.3f}] fm/c')
+    return coords
 
 
 # ---------------------------------------------------------------------------

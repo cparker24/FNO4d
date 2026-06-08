@@ -1,0 +1,85 @@
+# ---------------------------------------------------------------------------
+# workflow_torch/train.py config — HDF5 input example.
+#
+#   python train.py --config config.yaml
+#
+# Input type is inferred from the file extension: .h5/.hdf5 -> HDF5 source,
+# .root -> ROOT source (see config_root.yaml).  Everything else is shared.
+#
+# Keys marked [local]    are read only when data_source is local.
+# Keys marked [download] are read only when data_source is gcs_download.
+# ---------------------------------------------------------------------------
+
+# --- mode selection --------------------------------------------------------
+data_source: local        # local | gcs_download | gcs_stream
+                          # gcs_stream is ROOT-only (h5py needs local paths)
+
+# --- output ----------------------------------------------------------------
+odir:      ./out          # logs, metrics, training curves
+model_dir: ./checkpoints  # best_model + normalizer.npz + periodic checkpoints
+
+# --- input data ------------------------------------------------------------
+input_dir: ../data        # [local] directory prepended to each input file
+input_files:              # all the same type; concatenated in order
+  - dAu_25ev_mb.h5
+  # - dAu_25ev_mb_2.h5                 # [local]    add more files
+  # - gs://test_fno/dAu_25ev_mb.h5     # [download] use full gs:// URIs
+
+nevents_in:  10           # events to use (-1 = all across all files)
+start_event:  0           # [HDF5] first global event index
+lazy: true                # true = MultiH5Array, read per-batch (low RAM)
+
+# --- GCS [download] --------------------------------------------------------
+gcs_key_file: ./fnotest-wayne-gcs.json
+local_data_dir:    ../data
+overwrite_cache:   false
+gcs_show_progress: false
+# gcs_output_prefix: gs://test_fno/runs/run01   # upload odir+checkpoints after run
+
+# --- normalisation ---------------------------------------------------------
+normalization:
+  name: none              # none | etau75_3d | etau75_eta_3d |
+                          # etau75_eta_shape_3d | cosh_etau75_3d
+norm_chunk_size: 64       # [data-driven] events per chunk when fitting the ref
+
+# --- downsampling (optional) -----------------------------------------------
+# Coarsen the grid BEFORE the xy/eta/tau slices; auto-applied by build_dataloaders.
+#downsample:
+#  spatial_factor: 2
+#  tau_stride:     1
+#  reduce:         mean
+
+# --- data preparation ------------------------------------------------------
+train_ratio: 0.8
+xyslice:  [null, -1]      # drop last spatial bin
+etaslice: [null, -1]      # drop last eta bin
+tauslice: [null, null]    # full tau range
+
+# --- model -----------------------------------------------------------------
+model_type: fno           # fno | causal_fno4d | causal_fno4d_tau_eta
+hidden_channels: 16
+n_modes: [32, 32, 16, 16] # [x, y, eta, tau]; causal_* use only the first 3
+#causal_fno4d:            # extra kwargs for the causal variants
+#  n_layers: 7
+#  tau_max: 12.4          # causal_fno4d_tau_eta only
+#  eta_max: 4.0
+
+# --- training --------------------------------------------------------------
+n_epochs: 1
+batch_size: 1
+checkpoint_freq: null     # periodic checkpoint every N epochs; null = off
+min_save_epoch:  null     # skip best-saves before this epoch
+save_last: true           # write model_dir/last_model.pt (needed to resume)
+eval_interval: 2
+test_batch_sizes: [2]
+
+# --- loader (DataLoader workers / prefetch / locality) ---------------------
+loader:
+  num_workers: 4          # background prefetch workers (0 = synchronous)
+  prefetch_factor: 2
+  # locality_block: 256   # BlockBatchSampler block size for sequential I/O
+
+# --- optimizer / logging ---------------------------------------------------
+lr: 8.0e-3
+weight_decay: 1.0e-4
+log_directly: true
