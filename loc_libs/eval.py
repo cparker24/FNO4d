@@ -95,6 +95,8 @@ def run_inference(model, backend: str, device, data_test, normalizer,
         # tau-index 0 (its per-tau params line up), then strip the IC.
         x0 = x[..., :1]
         if normalizer is not None:
+            # inverse preserves the input dtype (float32 here) — see
+            # Normalizer._match_dtype — so pred/true stay float32, not float64.
             pred_phys.append(normalizer.inverse(np.concatenate([x0, out], axis=-1))[..., 1:])
             true_phys.append(normalizer.inverse(np.concatenate([x0, y],   axis=-1))[..., 1:])
         else:
@@ -103,6 +105,14 @@ def run_inference(model, backend: str, device, data_test, normalizer,
 
     model_out_phys = np.concatenate(pred_phys, axis=0)   # (N, C, nx, ny, neta, T)
     y_true_phys    = np.concatenate(true_phys, axis=0)
+
+    # Results are now materialised in numpy.  MLX's caching allocator keeps the
+    # freed batched-forward activation slabs in a reuse pool, which otherwise
+    # pins process RSS at the forward high-water mark long after inference ends.
+    # Return that pool to the OS so steady-state memory is just the numpy arrays.
+    if backend != 'torch':
+        mx.clear_cache()
+
     return model_out_phys, y_true_phys
 
 

@@ -243,6 +243,10 @@ coords = compute_grid_coords(data_test, grid_params)
 eta_coords     = coords['eta_coords']
 tau_out_coords = coords['tau_out_coords']
 
+# data_test is unused past this point; free the raw array (~several GB) before
+# the metric/figure phase, which allocates sizable spectral temporaries.
+del data_test
+
 # ---------------------------------------------------------------------------
 # metrics (model_eval.ModelEval)
 # ---------------------------------------------------------------------------
