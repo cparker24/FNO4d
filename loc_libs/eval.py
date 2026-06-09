@@ -79,7 +79,16 @@ def run_inference(model, backend: str, device, data_test, normalizer,
     else:
         import mlx.core as mx
 
-    pred_phys, true_phys = [], []
+    # Pre-allocate the two output arrays and write each batch slice in place.
+    # The old `list.append` + `np.concatenate` held every per-batch array AND
+    # the concatenated copy at once (a transient ~2x of the result) — that
+    # doubling set the process/allocator high-water mark.  Writing in place
+    # keeps the peak to the two outputs plus a single batch.  shuffle=False, so
+    # sequential slices preserve event order exactly as the concatenate did.
+    N = len(ds)
+    model_out_phys = None
+    y_true_phys    = None
+    pos = 0
     for b in loader:
         x, y = b['x'], b['y']                          # normalised: x=IC-repeat, y=truth
         if backend == 'torch':
@@ -97,14 +106,25 @@ def run_inference(model, backend: str, device, data_test, normalizer,
         if normalizer is not None:
             # inverse preserves the input dtype (float32 here) — see
             # Normalizer._match_dtype — so pred/true stay float32, not float64.
-            pred_phys.append(normalizer.inverse(np.concatenate([x0, out], axis=-1))[..., 1:])
-            true_phys.append(normalizer.inverse(np.concatenate([x0, y],   axis=-1))[..., 1:])
+            pred_b = normalizer.inverse(np.concatenate([x0, out], axis=-1))[..., 1:]
+            true_b = normalizer.inverse(np.concatenate([x0, y],   axis=-1))[..., 1:]
         else:
-            pred_phys.append(out)
-            true_phys.append(y)
+            pred_b, true_b = out, y
 
-    model_out_phys = np.concatenate(pred_phys, axis=0)   # (N, C, nx, ny, neta, T)
-    y_true_phys    = np.concatenate(true_phys, axis=0)
+        if model_out_phys is None:                     # first batch fixes shape + dtype
+            full_shape     = (N,) + pred_b.shape[1:]   # (N, C, nx, ny, neta, T-1)
+            model_out_phys = np.empty(full_shape, dtype=pred_b.dtype)
+            y_true_phys    = np.empty(full_shape, dtype=true_b.dtype)
+
+        bs = pred_b.shape[0]
+        model_out_phys[pos:pos + bs] = pred_b          # copies the batch in, frees the temp
+        y_true_phys[pos:pos + bs]    = true_b
+        pos += bs
+
+    if model_out_phys is None:                         # empty loader (N == 0)
+        empty_shape    = (0,) + tuple(data_test.shape[1:-1]) + (T - 1,)
+        model_out_phys = np.empty(empty_shape, dtype=np.float32)
+        y_true_phys    = np.empty(empty_shape, dtype=np.float32)
 
     # Results are now materialised in numpy.  MLX's caching allocator keeps the
     # freed batched-forward activation slabs in a reuse pool, which otherwise
