@@ -26,6 +26,7 @@ nav:
     - Overview: train.md
     - GCS Training: train_gcs.md
     - Generic Trainer: train_generic.md
+    - Data Pipeline: data_pipeline.md
   - Evaluation:
     - Overview: eval.md
     - GCS Evaluation: eval_gcs.md
@@ -55,6 +56,7 @@ plugins:
         'README_train.md': 'train.md'
         'README_train_gcs.md': 'train_gcs.md'
         'README_train_generic.md': 'train_generic.md'
+        'README_data_pipeline.md': 'data_pipeline.md'
         'README_eval.md': 'eval.md'
         'README_eval_gcs.md': 'eval_gcs.md'
         'README_eval_metric.md': 'eval_metric.md'

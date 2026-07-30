@@ -87,6 +87,13 @@ checkpoint_type: best
 # Epoch number — only relevant when checkpoint_type ends in _N
 checkpoint_epoch: 10
 
+# Forward-pass batch size for inference (run_inference / DataLoader).
+# Peak activation + FFT memory for the 4-D FNO scales ~linearly with this, and
+# MLX's caching allocator pins the high-water mark — so larger = faster but much
+# higher peak RAM.  1 restores the old per-event memory footprint; raise to 2-8
+# only if you have the headroom and want more throughput.
+eval_batch_size: 1
+
 # Default eval mode shown in the UI (basic | cont | metric)
 eval_mode: cont
 

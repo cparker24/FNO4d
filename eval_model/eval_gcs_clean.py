@@ -50,7 +50,10 @@ def _(mo):
     eval_cfg       = _ctx.eval_cfg
     train_cfg      = _ctx.train_cfg
     backend        = _ctx.backend
-    data_test_norm = _ctx.data_test_norm
+    # Keep only the event count, not the full raw array: the rest of the
+    # notebook needs nothing else from data_test, and exporting the array would
+    # pin ~4.5 GB resident (the whole point is to free it once _ctx is dropped).
+    n_test         = _ctx.data_test.shape[0]
     model_out_phys = _ctx.model_out_phys
     y_true_phys    = _ctx.y_true_phys
     eta_coords     = _ctx.eta_coords
@@ -64,11 +67,11 @@ def _(mo):
     ntau_out       = _ctx.ntau_out
     return (
         backend,
-        data_test_norm,
         dtau,
         eta_coords,
         eval_cfg,
         model_out_phys,
+        n_test,
         neta_eff,
         np,
         ntau_out,
@@ -87,10 +90,10 @@ def _(mo):
 # UI — create all widgets (no .value access in this cell)
 # ---------------------------------------------------------------------------
 @app.cell
-def _(data_test_norm, eval_cfg, mo, neta_eff, train_cfg):
+def _(eval_cfg, mo, n_test, neta_eff, train_cfg):
     _norm     = train_cfg.get('normalization', {})
     norm_name = _norm.get('name', 'none') if isinstance(_norm, dict) else str(_norm)
-    _n_test        = data_test_norm.shape[0]
+    _n_test        = n_test
     _default_mode  = eval_cfg.get('eval_mode', 'basic')
     _default_thresh = float(eval_cfg.get('active_threshold', 0.3))
 
@@ -407,6 +410,60 @@ def _(backend, eval_cfg, plt):
         plt.show()
     else:
         print(f'No {_p.name} found at {_p}')
+    return
+
+
+# ---------------------------------------------------------------------------
+# Memory diagnostic — splits process RSS into live arrays vs allocator cache.
+# An "(other)" row is a real resident array to chase (e.g. a stray data_test
+# or a float64 output); a large "unaccounted" with no "(other)" row is just
+# free-but-retained allocator memory (harmless, reused next run).
+# ---------------------------------------------------------------------------
+@app.cell
+def _(mo, model_out_phys, np, y_true_phys):
+    import gc
+    import psutil
+
+    gc.collect()
+
+    _named     = [('model_out_phys', model_out_phys), ('y_true_phys', y_true_phys)]
+    _named_ids = {id(_a) for _, _a in _named}
+    _rows      = [(_nm, _a.nbytes / 1e9, str(_a.dtype), tuple(_a.shape))
+                  for _nm, _a in _named]
+    _total     = sum(_r[1] for _r in _rows)
+
+    # any OTHER owned ndarray > 50 MB still resident
+    for _o in gc.get_objects():
+        if (isinstance(_o, np.ndarray) and _o.base is None
+                and _o.nbytes > 50e6 and id(_o) not in _named_ids):
+            _rows.append(('(other)', _o.nbytes / 1e9, str(_o.dtype), tuple(_o.shape)))
+            _total += _o.nbytes / 1e9
+
+    _rss = psutil.Process().memory_info().rss / 1e9
+    _mlx_active = _mlx_cache = _mlx_peak = 0.0
+    try:
+        import mlx.core as _mx
+        _mlx_active = _mx.get_active_memory() / 1e9
+        _mlx_cache  = _mx.get_cache_memory()  / 1e9
+        _mlx_peak   = _mx.get_peak_memory()   / 1e9
+    except Exception:
+        pass
+
+    _tbl = '\n'.join(f'| `{_nm}` | {_gb:.2f} | `{_dt}` | {_sh} |'
+                     for _nm, _gb, _dt, _sh in _rows)
+    mo.md(
+        '### Memory diagnostic\n\n'
+        '| array | size (GB) | dtype | shape |\n|---|---|---|---|\n'
+        + _tbl + '\n\n'
+        + f'- **live ndarrays (owned, >50 MB):** {_total:.2f} GB\n'
+        + f'- **MLX:** active {_mlx_active:.2f} · cache {_mlx_cache:.2f} · '
+          f'peak {_mlx_peak:.2f} GB\n'
+        + f'- **process RSS:** {_rss:.2f} GB\n'
+        + f'- **unaccounted (allocator cache / fragmentation):** '
+          f'{_rss - _total - _mlx_active:.2f} GB\n\n'
+        + '_Large `unaccounted` with no `(other)` row → free-but-retained '
+          'allocator memory. An `(other)` row → a real resident array._'
+    )
     return
 
 

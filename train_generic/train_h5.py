@@ -34,10 +34,19 @@ import argparse
 import yaml
 import sys
 import gc
+import multiprocessing as _mp
 import numpy as np
 from pathlib import Path
 from time import perf_counter
-from torch.utils.data import DataLoader
+
+# DataLoader workers must use 'fork' (DATA_PIPELINE_PLAN.md §9): the lazy
+# sources key their handle cache by pid so a forked worker reopens its own
+# handles, and fork copies this already-running script instead of re-importing
+# it (which 'spawn' does — re-executing the whole training script per worker).
+try:
+    _mp.set_start_method('fork')
+except RuntimeError:
+    pass  # already set by an earlier import
 
 # ---------------------------------------------------------------------------
 # parse args and load config
@@ -84,11 +93,7 @@ from training_utils import (RunLog, patch_trainer_logging, patch_trainer_checkpo
 from parse_training_log import TrainingHistory
 from norm_utils import build_normalizer
 
-from fluid_datasets import worker_init_fn
-if backend == 'torch':
-    from fluid_datasets import FluidDatasetH5
-else:
-    from fluid_datasets import FluidDatasetH5MLX
+from data import build_dataloaders
 
 # ---------------------------------------------------------------------------
 # GCS imports
@@ -140,6 +145,14 @@ eval_interval   = cfg.get('eval_interval', 2)
 save_last       = cfg.get('save_last', True)
 norm_cfg        = cfg.get('normalization', {'name': 'none'})
 norm_chunk_size = cfg.get('norm_chunk_size', 64)
+
+# loader / downsample (DATA_PIPELINE_PLAN.md §11–§12); num_workers may be set at
+# the top level (back-compat) or under a `loader:` block.
+downsample_cfg  = cfg.get('downsample')
+loader_cfg      = cfg.get('loader', {}) or {}
+num_workers     = loader_cfg.get('num_workers', num_workers)
+prefetch_factor = loader_cfg.get('prefetch_factor', 2)
+locality_block  = loader_cfg.get('locality_block')
 
 # ---------------------------------------------------------------------------
 # output dirs + logging
@@ -248,68 +261,6 @@ log(f'arr type:  {type(arr).__name__}')
 log(f'arr shape: {arr.shape}')
 
 # ---------------------------------------------------------------------------
-# train / val split  +  normalisation  +  datasets
-# ---------------------------------------------------------------------------
-n_total = len(arr)
-n_train = int(n_total * train_ratio)
-log(f'total events: {n_total}  →  train={n_train}  val={n_total - n_train}')
-
-normalizer = build_normalizer(norm_cfg, grid_params)
-log(f'normalizer: {normalizer}')
-
-DatasetCls = FluidDatasetH5 if backend == 'torch' else FluidDatasetH5MLX
-
-if lazy:
-    train_indices = np.arange(n_train)
-    val_indices   = np.arange(n_train, n_total)
-
-    # Data-driven normalizers store a reference array computed from the full
-    # training split.  Materialise those events once just for fitting, then
-    # discard.  Analytic normalizers (none, etau75_3d, cosh_etau75_3d) need
-    # no fitting and skip this block.
-    _needs_fit = normalizer.name in ('etau75_eta_3d', 'etau75_eta_shape_3d')
-    if _needs_fit:
-        log(f'[norm] data-driven normalizer: computing ref in chunks of {norm_chunk_size} events ...')
-        normalizer.fit_lazy(arr, n_train, xyslice, etaslice, tauslice, chunk_size=norm_chunk_size)
-        gc.collect()
-        log(f'[norm] ref computed  shape={normalizer.ref.shape}')
-
-    # normalizer is applied per-event inside __getitem__
-    dataset_train = DatasetCls(arr, indices=train_indices,
-                               xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
-                               normalizer=normalizer)
-    dataset_val   = DatasetCls(arr, indices=val_indices,
-                               xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
-                               normalizer=normalizer)
-
-else:
-    # Eager: materialise, slice, normalise up-front, then create datasets.
-    # Slices applied before normalizer.fit_transform so ref is computed from the
-    # same (neta', ntau') region used at runtime — matching the lazy path.
-    # normalizer omitted from DatasetCls because the arrays are already normalised.
-    data_train  = arr[0:n_train][:, :, xyslice, xyslice, etaslice, tauslice]
-    data_verify = arr[n_train:n_total][:, :, xyslice, xyslice, etaslice, tauslice]
-    del arr
-    gc.collect()
-
-    data_train  = normalizer.fit_transform(data_train)
-    data_verify = normalizer.transform(data_verify)
-
-    dataset_train = DatasetCls(data_train)
-    dataset_val   = DatasetCls(data_verify)
-
-normalizer_path = f'{model_dir}/normalizer.npz'
-normalizer.save(normalizer_path)
-log(f'normalizer  →  {normalizer_path}')
-
-# resolution after xyslice (used as test_loaders dict key)
-_sample_x = dataset_train[0]['x']
-test_resolutions = [_sample_x.shape[1]]   # nx after xyslice
-
-log(f'shapes train:  {dataset_train.n_samples} events  event_shape={dataset_train[0]["x"].shape}')
-log(f'shapes val:    {dataset_val.n_samples} events')
-
-# ---------------------------------------------------------------------------
 # device
 # ---------------------------------------------------------------------------
 if backend == 'torch':
@@ -320,31 +271,44 @@ else:
     log(f'Using device: {device} (MLX Metal)')
 
 # ---------------------------------------------------------------------------
-# data loaders
+# train / val split + normalisation + datasets + loaders
 # ---------------------------------------------------------------------------
-_nw      = num_workers if backend == 'torch' else 0
-_pin     = backend == 'torch'
-_persist = _nw > 0
-_prefetch = 2 if _nw > 0 else None
+# build_dataloaders (loc_libs/data) is the single entry shared by both backends
+# and all sources (DATA_PIPELINE_PLAN.md §11).  It auto-applies any `downsample:`
+# config and binds the coarse grid, fits data-driven normalizers chunked on the
+# train split, moves normalisation + first-tau windowing into a batched collate,
+# and uses torch DataLoader workers for MLX too (numpy collate; the MLX trainer
+# converts to mx.array).
+n_total = len(arr)
+log(f'total events: {n_total}  →  train={int(n_total * train_ratio)}  '
+    f'val={n_total - int(n_total * train_ratio)}')
+log(f'num_workers={num_workers}  prefetch_factor={prefetch_factor}  '
+    f'locality_block={locality_block}  downsample={bool(downsample_cfg)}')
 
-train_loader = DataLoader(dataset_train, batch_size=batch_size, shuffle=True,
-                          num_workers=_nw,
-                          persistent_workers=_persist,
-                          prefetch_factor=_prefetch,
-                          pin_memory=_pin,
-                          worker_init_fn=worker_init_fn)
+train_loader, test_loaders, normalizer = build_dataloaders(
+    arr, n_total=n_total, train_ratio=train_ratio,
+    xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
+    norm_cfg=norm_cfg, grid_params=grid_params,
+    backend=backend, batch_size=batch_size, test_batch_sizes=test_batch_sizes,
+    num_workers=num_workers, prefetch_factor=prefetch_factor,
+    downsample_cfg=downsample_cfg, locality_block=locality_block,
+    norm_chunk_size=norm_chunk_size)
+del arr
+gc.collect()
 
-test_loaders = {}
-for res, test_bsize in zip(test_resolutions, test_batch_sizes):
-    log(f'test resolution: {res}')
-    test_loaders[res] = DataLoader(dataset_val,
-                                   batch_size=test_bsize,
-                                   shuffle=False,
-                                   num_workers=_nw,
-                                   persistent_workers=_persist,
-                                   prefetch_factor=_prefetch,
-                                   pin_memory=_pin,
-                                   worker_init_fn=worker_init_fn)
+log(f'normalizer: {normalizer}')
+if normalizer.ref is not None:
+    log(f'[norm] data-driven ref shape={normalizer.ref.shape}')
+
+normalizer_path = f'{model_dir}/normalizer.npz'
+normalizer.save(normalizer_path)
+log(f'normalizer  →  {normalizer_path}')
+
+# resolutions are the test_loaders keys (nx after xyslice / downsample)
+test_resolutions = list(test_loaders.keys())
+_sample = next(iter(train_loader))
+log(f'batch x shape: {tuple(_sample["x"].shape)}  y shape: {tuple(_sample["y"].shape)}')
+del _sample
 gc.collect()
 
 # ---------------------------------------------------------------------------

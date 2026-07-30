@@ -169,25 +169,41 @@ class Normalizer:
                 data, self.tau_min, self.dtau, self.eta_min, self.deta, self.alpha)
         raise AssertionError('unreachable')
 
+    @staticmethod
+    def _match_dtype(out: np.ndarray, data: np.ndarray) -> np.ndarray:
+        """Downcast a result back to *data*'s dtype.
+
+        NormFn3d builds its tau grid in float64, so every transform/inverse
+        promotes a float32 input to float64 — silently doubling the memory of
+        every normalised/physical array.  The normalisation math still runs in
+        float64 internally (precision preserved); we only store the result at the
+        caller's input precision.  No-op when the input isn't a lower-precision
+        float (e.g. float64 in → float64 out is untouched).
+        """
+        if (np.issubdtype(data.dtype, np.floating)
+                and out.dtype.itemsize > data.dtype.itemsize):
+            return out.astype(data.dtype, copy=False)
+        return out
+
     def transform(self, data: np.ndarray) -> np.ndarray:
         """Normalise *validation/test* data using the ref from fit_transform."""
         if self.name == 'none':
             return data
         if self.name == 'etau75_3d':
-            return NormFn3d.etau75_3d(data, self.tau_min, self.dtau)
-        if self.name == 'etau75_eta_3d':
+            out = NormFn3d.etau75_3d(data, self.tau_min, self.dtau)
+        elif self.name == 'etau75_eta_3d':
             self._require_ref()
             out, _ = NormFn3d.etau75_eta_3d(data, self.tau_min, self.dtau, ref=self.ref)
-            return out
-        if self.name == 'etau75_eta_shape_3d':
+        elif self.name == 'etau75_eta_shape_3d':
             self._require_ref()
             out, _ = NormFn3d.etau75_eta_shape_3d(data, self.tau_min, self.dtau, shape_ref=self.ref)
-            return out
-        if self.name == 'cosh_etau75_3d':
+        elif self.name == 'cosh_etau75_3d':
             self._require_eta_params()
-            return NormFn3d.cosh_etau75_3d(
+            out = NormFn3d.cosh_etau75_3d(
                 data, self.tau_min, self.dtau, self.eta_min, self.deta, self.alpha)
-        raise AssertionError('unreachable')
+        else:
+            raise AssertionError('unreachable')
+        return self._match_dtype(out, data)
 
     # ------------------------------------------------------------------
     # inverse
@@ -198,18 +214,20 @@ class Normalizer:
         if self.name == 'none':
             return data
         if self.name == 'etau75_3d':
-            return NormFn3d.inv_etau75_3d(data, self.tau_min, self.dtau)
-        if self.name == 'etau75_eta_3d':
+            out = NormFn3d.inv_etau75_3d(data, self.tau_min, self.dtau)
+        elif self.name == 'etau75_eta_3d':
             self._require_ref()
-            return NormFn3d.inv_etau75_eta_3d(data, self.ref, self.tau_min, self.dtau)
-        if self.name == 'etau75_eta_shape_3d':
+            out = NormFn3d.inv_etau75_eta_3d(data, self.ref, self.tau_min, self.dtau)
+        elif self.name == 'etau75_eta_shape_3d':
             self._require_ref()
-            return NormFn3d.inv_etau75_eta_shape_3d(data, self.ref, self.tau_min, self.dtau)
-        if self.name == 'cosh_etau75_3d':
+            out = NormFn3d.inv_etau75_eta_shape_3d(data, self.ref, self.tau_min, self.dtau)
+        elif self.name == 'cosh_etau75_3d':
             self._require_eta_params()
-            return NormFn3d.inv_cosh_etau75_3d(
+            out = NormFn3d.inv_cosh_etau75_3d(
                 data, self.tau_min, self.dtau, self.eta_min, self.deta, self.alpha)
-        raise AssertionError('unreachable')
+        else:
+            raise AssertionError('unreachable')
+        return self._match_dtype(out, data)
 
     # ------------------------------------------------------------------
     # persistence
