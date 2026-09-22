@@ -22,15 +22,15 @@ model_dir: ./checkpoints  # best_model.safetensors and periodic checkpoints
 
 # --- input data ---
 # [local] directory prepended to each entry in input_files
-input_dir: ../data
+input_dir: ../../rootfiles
 
 # For local:        bare filenames  (e.g. dAu_25ev_mb.root)
 # For gcs_*:        full gs:// URIs (e.g. gs://my-bucket/data/file.root)
 input_files:
-  - dAu_25ev_mb.root
+  - AuAu_250ev_0_10_trimmedeta.root
   #- gs://test_fno/dAu_25ev_mb.root
 
-nevents_in: 10            # events to load (-1 = all)
+nevents_in: 200            # events to load (-1 = all)
 
 # --- GCS authentication [gcs] ---
 gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
@@ -47,15 +47,15 @@ gcs_show_progress: null     # null=auto  true=always  false=never
 
 # --- normalisation ---
 normalization:
-  name: none              # none | etau75_3d | etau75_eta_3d |
+  name: etau75_3d              # none | etau75_3d | etau75_eta_3d |
                           # etau75_eta_shape_3d | cosh_etau75_3d
-  # alpha: 1.0            # exponent for cosh_etau75_3d (default 1.0)
+  alpha: 1.0            # exponent for cosh_etau75_3d (default 1.0)
 
 # --- data preparation ---
 train_ratio: 0.8
 xyslice:  [null, -1]      # slice(None, -1) — drop last spatial bin
 etaslice: [null, -1]      # slice(None, -1) — drop last eta bin
-tauslice: [null, null]    # slice(None, None) — full tau range
+tauslice: [null, 35]    # slice(None, None) — full tau range
 
 # --- model ---
 hidden_channels: 16

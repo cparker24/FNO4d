@@ -18,8 +18,8 @@ gcs_key_file: ../train_generic/fnotest-wayne-gcs.json
 #   gcs_download   – download model_dir prefix from GCS to model_local_cache
 #   gcs_stream     – stream .pt checkpoints directly via gcsfs (no local copy);
 #                    safetensors are fetched to a temp file automatically
-model_access: gcs_download
-model_dir: gs://test_fno/runs/run_dAu_250ev_mb/checkpoints #./train_generic/checkpoints             # local path  OR  gs://bucket/prefix
+model_access: local
+model_dir: ../train_torch/checkpoints             # local path  OR  gs://bucket/prefix
 
 # Where to cache downloaded model files (only used for gcs_download)
 model_local_cache: ./cache/models/
@@ -27,7 +27,7 @@ model_local_cache: ./cache/models/
 # --- Training config ---
 # Path to the config.yaml produced during training.
 # May be a local path OR a gs:// URI (downloaded to model_local_cache).
-train_config: ./cache/models/config.yaml  #./train_generic/checkpoints/config.yaml
+train_config: ../train_torch/checkpoints/config.yaml
 
 # ---------------------------------------------------------------------------
 # Data source
@@ -42,7 +42,7 @@ data_access: local
 # Override data files (leave commented out to use the training config's file list).
 # Must be full gs:// URIs when data_access is gcs_stream / gcs_download.
 data_files:
-  - ../data/dAu_50ev_mb_test.h5                   # [local]    bare filename (prepend data_local_cache or input_dir)
+  - ../../rootfiles/AuAu_250ev_0_10_trimmedeta.root               # [local]    bare filename (prepend data_local_cache or input_dir)
   # - gs://my-bucket/data/dAu_25ev_mb.root  # [gcs_*]   full gs:// URI
   # - gs://my-bucket/data/dAu_25ev_mb.h5    # [gcs_download] HDF5 from GCS
 
@@ -54,10 +54,10 @@ data_format: auto
 
 # true  → eval on the test split (last 1-train_ratio fraction)
 # false → use all loaded events
-use_train_split: false #true
+use_train_split: true
 
 # Events to load (-1 = all)
-nevents: -1
+nevents: 200
 
 # Where to cache downloaded data files (only used for gcs_download)
 data_local_cache: ./cache/data
@@ -76,7 +76,7 @@ gcs_show_progress: null
 #   torch         – PyTorch inference
 #   mlx           – MLX inference (safetensors or auto-fallback to PT transfer)
 #   torch_to_mlx  – load PyTorch .pt weights and run in MLX
-backend: torch_to_mlx
+backend: torch
 
 # checkpoint_type:
 #   best / last / checkpoint_N              – native format for the chosen backend

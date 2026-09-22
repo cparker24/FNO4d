@@ -300,6 +300,12 @@ save_best_key = f'{test_resolutions[0]}_l2'
 # ---------------------------------------------------------------------------
 # train
 # ---------------------------------------------------------------------------
+# Source - https://stackoverflow.com/a/62556666
+# Posted by SHAGUN SHARMA, modified by community. See post 'Timeline' for change history
+# Retrieved 2026-09-10, License - CC BY-SA 4.0
+
+torch.cuda.memory_summary(device=None, abbreviated=False)
+
 reset_peak_memory(cuda=True)
 
 trainer.train(train_loader=train_loader,
