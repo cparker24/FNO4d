@@ -137,7 +137,7 @@ def _(eval_cfg, mo, n_test, neta_eff, train_cfg):
     cdfrats_ui      = mo.ui.text(value='0.05,0.1,0.2,0.3,0.4,0.6',
                                   label='CDF ratios for contour levels (comma-sep)')
     rescale_energy_ui = mo.ui.checkbox(
-        value=(norm_name != 'none'),
+        value=False,
         label='Rescale energy: (e/τ)^(4/3)',
     )
     return (

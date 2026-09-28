@@ -465,7 +465,7 @@ def _(data_test, eval_mode, mo, neta_eff, train_cfg):
                                     label="2nd and 3rd τ-step indices (comma-sep; 1st panel is always 0; -1=last non-zero)")
     cdfrats_ui        = mo.ui.text(value="0.05,0.1,0.2,0.3,0.4,0.6",
                                     label="CDF ratios for contour levels (comma-sep)")
-    rescale_energy_ui = mo.ui.checkbox(value=(_norm_name != 'none'),
+    rescale_energy_ui = mo.ui.checkbox(value=False,
                                         label="Rescale energy: (e/τ)^(4/3)")
 
     if eval_mode == 'basic':

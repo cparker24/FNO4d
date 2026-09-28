@@ -27,10 +27,12 @@ input_dir: ../../rootfiles
 # For local:        bare filenames  (e.g. dAu_25ev_mb.root)
 # For gcs_*:        full gs:// URIs (e.g. gs://my-bucket/data/file.root)
 input_files:
-  - AuAu_250ev_0_10_trimmedeta.root
+  - AuAu_100ev_0_10-1.root
+  - AuAu_50ev_0_10-1.root
+  - AuAu_50ev_0_10-2.root
   #- gs://test_fno/dAu_25ev_mb.root
 
-nevents_in: 200            # events to load (-1 = all)
+nevents_in: -1            # events to load (-1 = all)
 
 # --- GCS authentication [gcs] ---
 gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key

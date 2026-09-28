@@ -42,7 +42,9 @@ data_access: local
 # Override data files (leave commented out to use the training config's file list).
 # Must be full gs:// URIs when data_access is gcs_stream / gcs_download.
 data_files:
-  - ../../rootfiles/AuAu_250ev_0_10_trimmedeta.root               # [local]    bare filename (prepend data_local_cache or input_dir)
+  - ../../rootfiles/AuAu_50ev_0_10-1.root               # [local]    bare filename (prepend data_local_cache or input_dir)
+  - ../../rootfiles/AuAu_50ev_0_10-2.root
+  - ../../rootfiles/AuAu_100ev_0_10-1.root 
   # - gs://my-bucket/data/dAu_25ev_mb.root  # [gcs_*]   full gs:// URI
   # - gs://my-bucket/data/dAu_25ev_mb.h5    # [gcs_download] HDF5 from GCS
 
@@ -57,7 +59,7 @@ data_format: auto
 use_train_split: true
 
 # Events to load (-1 = all)
-nevents: 200
+nevents: -1
 
 # Where to cache downloaded data files (only used for gcs_download)
 data_local_cache: ./cache/data
