@@ -1,0 +1,155 @@
+[INFO] created odir '/tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/out50_100' (did not exist)
+[INFO] created model_dir '/tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100' (did not exist)
+config:          /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/memscan50_100.yaml
+backend:         torch
+data_source:     local
+input files:     ['AuAu_100ev_0_10-1.root', 'AuAu_50ev_0_10-1.root', 'AuAu_50ev_0_10-2.root']
+input dir:       ../../rootfiles
+n_epochs:        50
+batch_size:      1
+hidden_channels: 16
+checkpoint_freq: None
+min_save_epoch:  None
+n_modes:         [32, 32, 16, 16]
+train_ratio:     0.8
+xyslice:         slice(None, -1, None)
+etaslice:        slice(None, -1, None)
+tauslice:        slice(None, 100, None)
+log_directly:    True
+nevents(in):     -1
+AdamW: lr:         0.008
+AdamW: weight_decay: 0.0001
+test_batch_sizes:  [5]
+eval_interval:     2
+model_dir:         /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+normalization:     {'name': 'etau75_3d', 'alpha': 1.0}
+Events called for -1
+Grid parameters:
+  nx: 65, ny: 65, neta: 17, ntau: 0
+  x_min: -10.0, y_min: -10.0, eta_min: -1.5
+  dx: 0.3125, dy: 0.3125, deta: 0.1875, tau_min: 0.4399999976158142, dtau: 0.10000000149011612
+  ntau_freezeout: [106  91 103  94 105 100 107  96 107  96  96 105  98  95 104  99 100 100
+ 106  88  98 104 107  96 104 104  96 104  96 104 104  98 104 107 100  97
+ 106 102 101 101 105 107  99 102 114  95 105  96 103  97 102 103 103 100
+  96 106 102  99 107 100  97  99  92 108  98  89  94  91  96 104 109 112
+ 104  99  97 108  98 110 101  96 113 103 102 105 109  98  97 103 108  96
+ 107 101  97 100 101 108 103 100  98  91  98 107 111 104 103 107  92 111
+  97 107 102  98 100 102 101  98  96 102 113 101 106 106 108 102 103  96
+ 104  98  99 110  98  97 100 104  95 108 108 106 101 103  97 107 111  98
+ 100  97 102 104  97 103  98  99 103 103 100  99  93 105 106 106  98  99
+  97 101 108  97 105 101 109  99 100  95  96  97 103 106 110 107 103  99
+ 106 101 101 102 100  96 103  94 112  96 113  96  93 103  98 103 107  99
+ 102 104], tau_min_MUSIC: 0.4000000059604645
+Total events available across 3 file(s): 200
+Selected events: 200
+Processing 200 events with variable-length tau dimension; padding to 114 taus per event (total size per event: 32752200 entries)
+Processing events 0 to 20...
+Processing events 20 to 40...
+Processing events 40 to 60...
+Processing events 60 to 80...
+Processing events 80 to 100...
+Processing events 100 to 120...
+Processing events 120 to 140...
+Processing events 140 to 150...
+Processing events 150 to 170...
+Processing events 170 to 190...
+Processing events 190 to 200...
+Before moveaxis - Read array of shape: (200, 114, 65, 65, 17, 4)
+Read array of shape: (200, 4, 65, 65, 17, 114)
+Data parameters from input file:
+  nFeatures: 4
+  nx: 65
+  ny: 65
+  neta: 17
+  x_min: -10.0
+  y_min: -10.0
+  eta_min: -1.5
+  dx: 0.3125
+  dy: 0.3125
+  deta: 0.1875
+  tau_min: 0.4399999976158142
+  tau_min_MUSIC: 0.4000000059604645
+  dtau: 0.10000000149011612
+  ntau: 0
+nevents (constrained by input file(s)): 200
+shapes train:  (160, 4, 64, 64, 16, 100)
+shapes verify: (40, 4, 64, 64, 16, 100)
+normalizer:      Normalizer(name='etau75_3d', tau_min=0.4399999976158142, dtau=0.10000000149011612, alpha=1.0, ref=None)
+normalizer  →  /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100/normalizer.npz
+Using device: cuda:0
+Numpy data shape:  (160, 4, 64, 64, 16, 100)
+Numpy data shape:  (40, 4, 64, 64, 16, 100)
+res 64
+Total parameters: 301993652
+Model memory usage: 1152.01 MB
+Training on 160 samples
+Testing on [40] samples         on resolutions [64].
+Raw outputs of shape torch.Size([1, 4, 64, 64, 16, 99])
+[0] time=99.10, avg_loss=2.4000, train_err=2.4000
+Eval: 64_h1=2.0149, 64_l2=1.0141
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[2] time=100.76, avg_loss=1.8279, train_err=1.8279
+Eval: 64_h1=1.7865, 64_l2=0.7972
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[4] time=100.43, avg_loss=1.6250, train_err=1.6250
+Eval: 64_h1=1.6449, 64_l2=0.6691
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[6] time=99.80, avg_loss=1.5284, train_err=1.5284
+Eval: 64_h1=1.5388, 64_l2=0.6292
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[8] time=100.42, avg_loss=1.4823, train_err=1.4823
+Eval: 64_h1=1.5458, 64_l2=0.6064
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[10] time=100.47, avg_loss=1.3982, train_err=1.3982
+Eval: 64_h1=1.5137, 64_l2=0.5987
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[12] time=100.23, avg_loss=1.3363, train_err=1.3363
+Eval: 64_h1=1.5202, 64_l2=0.5644
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[14] time=100.05, avg_loss=1.2872, train_err=1.2872
+Eval: 64_h1=1.5155, 64_l2=0.5500
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[16] time=99.86, avg_loss=1.1547, train_err=1.1547
+Eval: 64_h1=1.4734, 64_l2=0.4979
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[18] time=99.88, avg_loss=1.0484, train_err=1.0484
+Eval: 64_h1=1.4926, 64_l2=0.5151
+[20] time=100.48, avg_loss=0.9837, train_err=0.9837
+Eval: 64_h1=1.5543, 64_l2=0.5268
+[22] time=99.96, avg_loss=0.9139, train_err=0.9139
+Eval: 64_h1=1.5412, 64_l2=0.4839
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[24] time=100.44, avg_loss=0.8585, train_err=0.8585
+Eval: 64_h1=1.5507, 64_l2=0.4786
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[26] time=100.17, avg_loss=0.8091, train_err=0.8091
+Eval: 64_h1=1.5469, 64_l2=0.4788
+[28] time=100.23, avg_loss=0.7934, train_err=0.7934
+Eval: 64_h1=1.5573, 64_l2=0.4753
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[30] time=100.62, avg_loss=0.7901, train_err=0.7901
+Eval: 64_h1=1.5563, 64_l2=0.4751
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_100
+[32] time=99.92, avg_loss=0.7908, train_err=0.7908
+Eval: 64_h1=1.5596, 64_l2=0.4763
+[34] time=100.62, avg_loss=0.7916, train_err=0.7916
+Eval: 64_h1=1.5619, 64_l2=0.4767
+[36] time=100.67, avg_loss=0.7943, train_err=0.7943
+Eval: 64_h1=1.5353, 64_l2=0.4788
+[38] time=100.66, avg_loss=0.8410, train_err=0.8410
+Eval: 64_h1=1.5685, 64_l2=0.4837
+[40] time=100.62, avg_loss=0.9062, train_err=0.9062
+Eval: 64_h1=1.5730, 64_l2=0.5021
+[42] time=100.48, avg_loss=0.8967, train_err=0.8967
+Eval: 64_h1=1.6094, 64_l2=0.5290
+[44] time=100.46, avg_loss=0.9007, train_err=0.9007
+Eval: 64_h1=1.5968, 64_l2=0.5439
+[46] time=100.57, avg_loss=0.9480, train_err=0.9480
+Eval: 64_h1=1.5838, 64_l2=0.4937
+[48] time=100.58, avg_loss=0.9337, train_err=0.9337
+Eval: 64_h1=1.5155, 64_l2=0.5251
+peak CPU memory (RSS): 20.71 GB
+peak CUDA memory:      21.15 GB
+metrics   → /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/out50_100/metrics.json
+curves    → /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/out50_100/training_curves.svg
+total time: 5686.2s

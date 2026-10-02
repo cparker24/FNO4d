@@ -1,0 +1,156 @@
+[INFO] created odir '/tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/out50_90' (did not exist)
+[INFO] created model_dir '/tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90' (did not exist)
+config:          /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/memscan50_90.yaml
+backend:         torch
+data_source:     local
+input files:     ['AuAu_100ev_0_10-1.root', 'AuAu_50ev_0_10-1.root', 'AuAu_50ev_0_10-2.root']
+input dir:       ../../rootfiles
+n_epochs:        50
+batch_size:      1
+hidden_channels: 16
+checkpoint_freq: None
+min_save_epoch:  None
+n_modes:         [32, 32, 16, 16]
+train_ratio:     0.8
+xyslice:         slice(None, -1, None)
+etaslice:        slice(None, -1, None)
+tauslice:        slice(None, 90, None)
+log_directly:    True
+nevents(in):     -1
+AdamW: lr:         0.008
+AdamW: weight_decay: 0.0001
+test_batch_sizes:  [5]
+eval_interval:     2
+model_dir:         /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+normalization:     {'name': 'etau75_3d', 'alpha': 1.0}
+Events called for -1
+Grid parameters:
+  nx: 65, ny: 65, neta: 17, ntau: 0
+  x_min: -10.0, y_min: -10.0, eta_min: -1.5
+  dx: 0.3125, dy: 0.3125, deta: 0.1875, tau_min: 0.4399999976158142, dtau: 0.10000000149011612
+  ntau_freezeout: [106  91 103  94 105 100 107  96 107  96  96 105  98  95 104  99 100 100
+ 106  88  98 104 107  96 104 104  96 104  96 104 104  98 104 107 100  97
+ 106 102 101 101 105 107  99 102 114  95 105  96 103  97 102 103 103 100
+  96 106 102  99 107 100  97  99  92 108  98  89  94  91  96 104 109 112
+ 104  99  97 108  98 110 101  96 113 103 102 105 109  98  97 103 108  96
+ 107 101  97 100 101 108 103 100  98  91  98 107 111 104 103 107  92 111
+  97 107 102  98 100 102 101  98  96 102 113 101 106 106 108 102 103  96
+ 104  98  99 110  98  97 100 104  95 108 108 106 101 103  97 107 111  98
+ 100  97 102 104  97 103  98  99 103 103 100  99  93 105 106 106  98  99
+  97 101 108  97 105 101 109  99 100  95  96  97 103 106 110 107 103  99
+ 106 101 101 102 100  96 103  94 112  96 113  96  93 103  98 103 107  99
+ 102 104], tau_min_MUSIC: 0.4000000059604645
+Total events available across 3 file(s): 200
+Selected events: 200
+Processing 200 events with variable-length tau dimension; padding to 114 taus per event (total size per event: 32752200 entries)
+Processing events 0 to 20...
+Processing events 20 to 40...
+Processing events 40 to 60...
+Processing events 60 to 80...
+Processing events 80 to 100...
+Processing events 100 to 120...
+Processing events 120 to 140...
+Processing events 140 to 150...
+Processing events 150 to 170...
+Processing events 170 to 190...
+Processing events 190 to 200...
+Before moveaxis - Read array of shape: (200, 114, 65, 65, 17, 4)
+Read array of shape: (200, 4, 65, 65, 17, 114)
+Data parameters from input file:
+  nFeatures: 4
+  nx: 65
+  ny: 65
+  neta: 17
+  x_min: -10.0
+  y_min: -10.0
+  eta_min: -1.5
+  dx: 0.3125
+  dy: 0.3125
+  deta: 0.1875
+  tau_min: 0.4399999976158142
+  tau_min_MUSIC: 0.4000000059604645
+  dtau: 0.10000000149011612
+  ntau: 0
+nevents (constrained by input file(s)): 200
+shapes train:  (160, 4, 64, 64, 16, 90)
+shapes verify: (40, 4, 64, 64, 16, 90)
+normalizer:      Normalizer(name='etau75_3d', tau_min=0.4399999976158142, dtau=0.10000000149011612, alpha=1.0, ref=None)
+normalizer  →  /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90/normalizer.npz
+Using device: cuda:0
+Numpy data shape:  (160, 4, 64, 64, 16, 90)
+Numpy data shape:  (40, 4, 64, 64, 16, 90)
+res 64
+Total parameters: 301993652
+Model memory usage: 1152.01 MB
+Training on 160 samples
+Testing on [40] samples         on resolutions [64].
+Raw outputs of shape torch.Size([1, 4, 64, 64, 16, 89])
+[0] time=98.52, avg_loss=2.0525, train_err=2.0525
+Eval: 64_h1=1.4746, 64_l2=0.7799
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[2] time=100.91, avg_loss=1.2582, train_err=1.2582
+Eval: 64_h1=1.1831, 64_l2=0.5824
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[4] time=100.54, avg_loss=1.0693, train_err=1.0693
+Eval: 64_h1=1.0585, 64_l2=0.5249
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[6] time=99.58, avg_loss=0.9788, train_err=0.9788
+Eval: 64_h1=1.0097, 64_l2=0.4324
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[8] time=100.51, avg_loss=0.9140, train_err=0.9140
+Eval: 64_h1=0.9717, 64_l2=0.3899
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[10] time=100.61, avg_loss=0.8622, train_err=0.8622
+Eval: 64_h1=0.9627, 64_l2=0.3824
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[12] time=100.02, avg_loss=0.8139, train_err=0.8139
+Eval: 64_h1=0.9675, 64_l2=0.4281
+[14] time=99.95, avg_loss=0.7726, train_err=0.7726
+Eval: 64_h1=0.9476, 64_l2=0.3712
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[16] time=99.71, avg_loss=0.7356, train_err=0.7356
+Eval: 64_h1=0.9457, 64_l2=0.3605
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[18] time=99.62, avg_loss=0.7022, train_err=0.7022
+Eval: 64_h1=0.9421, 64_l2=0.3458
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[20] time=100.72, avg_loss=0.6770, train_err=0.6770
+Eval: 64_h1=0.9406, 64_l2=0.3397
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[22] time=99.75, avg_loss=0.6568, train_err=0.6568
+Eval: 64_h1=0.9387, 64_l2=0.3325
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[24] time=100.55, avg_loss=0.6421, train_err=0.6421
+Eval: 64_h1=0.9409, 64_l2=0.3345
+[26] time=100.42, avg_loss=0.6333, train_err=0.6333
+Eval: 64_h1=0.9417, 64_l2=0.3287
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[28] time=100.00, avg_loss=0.6285, train_err=0.6285
+Eval: 64_h1=0.9399, 64_l2=0.3277
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[30] time=100.72, avg_loss=0.6271, train_err=0.6271
+Eval: 64_h1=0.9399, 64_l2=0.3272
+[Rank 0]: saved training state to /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/ckpt50_90
+[32] time=99.62, avg_loss=0.6280, train_err=0.6280
+Eval: 64_h1=0.9399, 64_l2=0.3280
+[34] time=100.75, avg_loss=0.6297, train_err=0.6297
+Eval: 64_h1=0.9413, 64_l2=0.3293
+[36] time=100.77, avg_loss=0.6316, train_err=0.6316
+Eval: 64_h1=0.9383, 64_l2=0.3400
+[38] time=100.75, avg_loss=0.6334, train_err=0.6334
+Eval: 64_h1=0.9431, 64_l2=0.3358
+[40] time=100.72, avg_loss=0.6383, train_err=0.6383
+Eval: 64_h1=0.9419, 64_l2=0.3406
+[42] time=100.56, avg_loss=0.6461, train_err=0.6461
+Eval: 64_h1=0.9561, 64_l2=0.3530
+[44] time=100.57, avg_loss=0.6528, train_err=0.6528
+Eval: 64_h1=0.9611, 64_l2=0.3549
+[46] time=100.66, avg_loss=0.6567, train_err=0.6567
+Eval: 64_h1=0.9634, 64_l2=0.3781
+[48] time=100.67, avg_loss=0.6528, train_err=0.6528
+Eval: 64_h1=0.9698, 64_l2=0.3702
+peak CPU memory (RSS): 18.76 GB
+peak CUDA memory:      19.48 GB
+metrics   → /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/out50_90/metrics.json
+curves    → /tmp/claude-1003/-home-cparker/ff15d172-9ac3-4771-946f-07ee47877276/scratchpad/memscan10/out50_90/training_curves.svg
+total time: 5677.6s
