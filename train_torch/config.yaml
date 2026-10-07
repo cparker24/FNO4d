@@ -28,8 +28,12 @@ input_dir: ../../rootfiles
 # For gcs_*:        full gs:// URIs (e.g. gs://my-bucket/data/file.root)
 input_files:
   - AuAu_100ev_0_10-1.root
-  - AuAu_50ev_0_10-1.root
-  - AuAu_50ev_0_10-2.root
+  - AuAu_50ev_10_20-1.root
+  - AuAu_50ev_10_20-2.root
+  - AuAu_50ev_20_30-1.root
+  - AuAu_50ev_20_30-2.root
+  - AuAu_50ev_30_40-1.root
+  - AuAu_50ev_30_40-2.root
   #- gs://test_fno/dAu_25ev_mb.root
 
 nevents_in: -1            # events to load (-1 = all)
@@ -57,7 +61,7 @@ normalization:
 train_ratio: 0.8
 xyslice:  [null, -1]      # slice(None, -1) — drop last spatial bin
 etaslice: [null, -1]      # slice(None, -1) — drop last eta bin
-tauslice: [null, 100]    # slice(None, None) — full tau range
+tauslice: [null, 70]    # slice(None, None) — full tau range
 
 # --- model ---
 hidden_channels: 16

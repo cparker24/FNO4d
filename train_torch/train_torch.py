@@ -89,6 +89,7 @@ train_ratio     = cfg.get('train_ratio', 0.8)
 xyslice         = _slice(cfg.get('xyslice',  [None, -1]))
 etaslice        = _slice(cfg.get('etaslice', [None, None]))
 tauslice        = _slice(cfg.get('tauslice', [None, -1]))
+min_ntau_freezeout = cfg.get('min_ntau_freezeout', 10)
 lr              = cfg['lr']
 weight_decay    = cfg.get('weight_decay', 1e-4)
 test_batch_sizes = cfg.get('test_batch_sizes', [10])
@@ -155,6 +156,7 @@ log(f'train_ratio:     {train_ratio}')
 log(f'xyslice:         {xyslice}')
 log(f'etaslice:        {etaslice}')
 log(f'tauslice:        {tauslice}')
+log(f'min_ntau_freezeout: {min_ntau_freezeout}')
 log(f'log_directly:    {log_directly}')
 log(f'nevents(in):     {nevents_in}')
 log(f'AdamW: lr:         {lr}')
@@ -196,7 +198,17 @@ for key in arr_data.keys():
     if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
         log(f'  {key}: {arr_data[key]}')
 
-arr = arr_data['arr']
+ntau_freezeout = arr_data['ntau_freezeout']
+good_event_mask = ntau_freezeout >= min_ntau_freezeout
+n_dropped = int((~good_event_mask).sum())
+if n_dropped > 0:
+    log(f'Dropping {n_dropped}/{len(ntau_freezeout)} event(s) with '
+        f'ntau_freezeout < {min_ntau_freezeout} -- these are blank or near-blank '
+        f'records left behind when MUSIC crashed partway through generating the '
+        f'data file, and training on them corrupts the loss (a near-zero-norm '
+        f'target blows up the relative L2/H1 loss computation).')
+
+arr = arr_data['arr'][good_event_mask]
 arr = arr[:, :, xyslice, xyslice, etaslice, tauslice]
 
 grid_params = {k: arr_data[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
