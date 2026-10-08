@@ -14,6 +14,7 @@ denormalizing in place in `BuildNextWindowIC`).
 |---|---|---|---|---|---|---|---|
 | A | 200 (0-10/10-20/20-30/30-40, 50 each) | 100 | 30 | 0.969 (epoch 28) | 21.15 GB | 3488s | superseded |
 | B | 400 (100 each) | 70 | 30 | **0.627** (epoch 28) | 17.44 GB | 5627s | **current best by training loss** |
+| C (capacity: n_modes tau 16->32, 570M params vs B's 302M) | 400 (100 each) | 70 | 30 | 0.638 (epoch 28) | 21.44 GB | 6526s | superseded -- no improvement |
 
 Run B's eval-loss curve is also qualitatively cleaner (smooth decrease,
 1.24->0.627) vs run A's noisier one -- more data clearly helps the training
@@ -32,19 +33,27 @@ froze out at tau=8.76 fm/c):
 | Pre-fix (buggy input norm) | 494 MeV (MUSIC: 381) -- **over**-predicts | stays ~30-100+ MeV hotter than MUSIC throughout | never (still ~168 MeV at window end) | none observed (never gets there) |
 | Run A (200 ev, tau=100) | 346 MeV -- close | runs ~20-40 MeV **cooler** than MUSIC | tau~6.8 (MUSIC: 8.76) -- early | dips to ~65-75 MeV then partially recovers, tau~9 |
 | Run B (400 ev, tau=70) | 341 MeV -- close | **same under-prediction as run A**, no improvement | tau~6.7 (window ends tau~7.3, too short to compare tail) | smaller dip (~95-100 MeV), earlier, shorter window to observe it in |
+| Run C (capacity: tau-modes=32) | 310 MeV -- close | **tracks run B almost exactly, no improvement** | tau~6.7, same as run B | same pattern as run B, no change |
 
 **Headline finding: expanding training data 2x and shrinking tauslice from
-100->70 did not close the mid-evolution cooling-rate gap.** Runs A and B
-track each other almost exactly relative to MUSIC. The gap looks
-structural (capacity, loss function, or architecture) rather than a
-data-quantity or window-length problem -- which is what prompted the
-model-capacity investigation this benchmark precedes.
+100->70 did not close the mid-evolution cooling-rate gap, and neither did
+nearly doubling model capacity (run C, 570M vs 302M params, tau-axis
+Fourier modes 16->32) targeted specifically at the temporal-resolution
+hypothesis.** Runs A, B, and C all track each other almost exactly relative
+to MUSIC -- run C's eval l2 (0.638) wasn't even measurably better than run
+B's (0.627). This is a fairly decisive negative result: the mid-evolution
+gap is not a capacity bottleneck in this dimension. Whatever's driving it
+is more likely the loss function's behavior in this regime, the
+normalization scheme's structure, a systematic bias in the training data
+itself, or a genuine limitation of this model class/training setup rather
+than something more data or more parameters fixes.
 
 Plots: `fno_vs_music_cen3040/fno_vs_music_cen3040_seed424242.png` (buggy
 norm, superseded by the finding below -- kept for the historical
 over-prediction record), `fno_vs_music_cen3040/fno_vs_music_cen3040_seed424242_v2.png`
 (fixed norm, run A), `fno_vs_music_cen3040/fno_vs_music_cen3040_seed424242_v3.png`
-(run A vs run B vs MUSIC, 3-way).
+(run A vs run B vs MUSIC, 3-way), `fno_vs_music_cen3040/fno_vs_music_cen3040_seed424242_v4.png`
+(run A vs run B vs run C vs MUSIC, 4-way).
 
 ## Post-fix 20-event centrality sweep (run A checkpoint, before run B existed)
 
@@ -83,6 +92,11 @@ history around Oct 6-7 2026 for the ROOT `TFile::Flush()` fix):
 ## Open issue carried forward
 
 Mid-evolution (tau 2-6 fm/c) systematic under-prediction of ~20-40 MeV
-relative to real MUSIC, consistent across both data scales tested. Next:
-investigate `hidden_channels`/`n_modes` (model capacity) as the likely
-remaining lever.
+relative to real MUSIC, consistent across data scale (runs A/B) and model
+capacity (run C) -- capacity is now ruled out as the driver. Next
+candidates: loss function behavior in this regime, the normalization
+scheme's structure, or a systematic training-data bias (e.g. whether the
+training targets themselves, taken from MUSIC's own output, show the same
+mid-evolution values the live comparison expects -- worth directly
+checking a training-set event's ground truth against this same metric
+before assuming the model is at fault rather than a data/eval mismatch).
