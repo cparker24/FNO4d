@@ -89,14 +89,42 @@ history around Oct 6-7 2026 for the ROOT `TFile::Flush()` fix):
 - `AuAu_50ev_20_30-1.root` + `-2` (100 events)
 - `AuAu_50ev_30_40-1.root` + `-2` (100 events)
 
+## Grid-resolution hypothesis (tested, refuted)
+
+`RootBulkWriter`'s configured output grid (dx=0.3125, nx=65) is coarser
+than MUSIC's native solver grid (dx=0.20202, nx=99) -- a real rebinning
+step the training ground truth goes through that the live
+`WriteMusicPeakTemperatureDiagnostics` comparison (reads `bulk_info`
+directly, no rebinning) doesn't. Initial single-event check looked like it
+confirmed this: training event 0 of `AuAu_50ev_30_40-1.root` (coarse grid)
+showed ~5-15% lower max-ed than the live seed=424242 MUSIC comparison at
+every matched tau, and its peak at tau=0.44 (36.14) was close to the live
+comparison's (36.52), suggesting they were the same underlying event.
+
+Generated 20 new events at MUSIC's exact native resolution to test this
+properly (`AuAu_20ev_30_40_finegrid.root`, nx=ny=99, dx=0.20202 --
+`RootBulkWriter`'s `x_min=0`/`dx=0` auto-match XML option resolves to the
+wrong thing, the externally-configured IS/MCGlauber grid, not MUSIC's true
+solver grid, so the native dx had to be hardcoded instead). Averaged
+properly across all 20 fine-grid events vs all 50 coarse-grid events:
+peak energy density is statistically the same (51.4 vs 50.9 GeV/fm^3, ~1%
+apart) and the normalized (relative-to-own-peak) decay shape is nearly
+indistinguishable at every tau checked. **Refuted**: rebinning doesn't
+meaningfully touch peak height or decay rate. The original single-event
+"confirmation" was almost certainly coincidental similarity between two
+different events (same centrality bin, different nucleon configuration),
+not the same event, given peak values vary by several percent from natural
+event-to-event fluctuation alone.
+
+Data kept for reference: `AuAu_20ev_30_40_finegrid.root` in `rootfiles/`.
+
 ## Open issue carried forward
 
 Mid-evolution (tau 2-6 fm/c) systematic under-prediction of ~20-40 MeV
-relative to real MUSIC, consistent across data scale (runs A/B) and model
-capacity (run C) -- capacity is now ruled out as the driver. Next
-candidates: loss function behavior in this regime, the normalization
-scheme's structure, or a systematic training-data bias (e.g. whether the
-training targets themselves, taken from MUSIC's own output, show the same
-mid-evolution values the live comparison expects -- worth directly
-checking a training-set event's ground truth against this same metric
-before assuming the model is at fault rather than a data/eval mismatch).
+relative to real MUSIC on an identical initial condition (true matched-seed
+comparison, not a coincidental one), consistent across data scale (runs
+A/B), model capacity (run C), and now also grid resolution -- all four
+ruled out. Remaining candidates: loss function behavior in this specific
+regime, the normalization scheme's own structure, or some other mismatch
+between the training data pipeline and the live inference pipeline not yet
+identified.
