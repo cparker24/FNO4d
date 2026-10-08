@@ -216,6 +216,8 @@ del arr_data
 gc.collect()
 
 log(f'nevents (constrained by input file(s)): {arr.shape[0]}')
+n_features = arr.shape[1]
+log(f'n_features (from data): {n_features}')
 test_resolutions = [arr.shape[2]]
 
 # ---------------------------------------------------------------------------
@@ -272,8 +274,8 @@ gc.collect()
 # model
 # ---------------------------------------------------------------------------
 model = FNO(
-    in_channels=4,
-    out_channels=4,
+    in_channels=n_features,
+    out_channels=n_features,
     n_modes=n_modes,
     hidden_channels=hidden_channels,
     projection_channel_ratio=2,
