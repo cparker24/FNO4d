@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# Run D: run B's dataset scale (400 events, 4 centralities) regenerated with
+# an explicit temperature channel (nFeatures 4->5: ed, T, vx, vy, vz),
+# otherwise matching run B's settings exactly for an apples-to-apples
+# comparison. See out/BENCHMARKS.md for runs A/B/C.
+# ---------------------------------------------------------------------------
+
+data_source: local
+
+odir:      ./out_run_d_temperature
+model_dir: ./checkpoints_run_d_temperature
+
+input_dir: ../../rootfiles
+input_files:
+  - AuAu_50ev_0_10_withT-1.root
+  - AuAu_50ev_0_10_withT-2.root
+  - AuAu_50ev_10_20_withT-1.root
+  - AuAu_50ev_10_20_withT-2.root
+  - AuAu_50ev_20_30_withT-1.root
+  - AuAu_50ev_20_30_withT-2.root
+  - AuAu_50ev_30_40_withT-1.root
+  - AuAu_50ev_30_40_withT-2.root
+
+nevents_in: -1
+
+normalization:
+  name: etau75_3d
+  alpha: 1.0
+
+train_ratio: 0.8
+xyslice:  [null, -1]
+etaslice: [null, -1]
+tauslice: [null, 70]
+
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]
+
+n_epochs: 30
+batch_size: 1
+checkpoint_freq: null
+min_save_epoch:  null
+save_last: true
+eval_interval: 2
+# 2, not run B's 5: the 5th (temperature) channel raises per-sample eval
+# memory ~25% over run B's 4-channel config, which OOM'd during epoch 4's
+# eval step at batch_size 5 (22.4/23.68 GiB used, allocator fragmentation
+# on top). Eval batch size doesn't affect the model or the metric itself,
+# just how many samples are batched together to compute it.
+test_batch_sizes: [2]
+
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+log_directly: true

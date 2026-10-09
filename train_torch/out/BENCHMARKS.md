@@ -118,13 +118,77 @@ event-to-event fluctuation alone.
 
 Data kept for reference: `AuAu_20ev_30_40_finegrid.root` in `rootfiles/`.
 
+## Run D: explicit temperature channel (tested, negative result)
+
+Hypothesis: the model derives temperature from predicted energy density via
+the EOS at inference time (`GetTemperatureFromEos`); maybe training it to
+predict temperature directly (as its own channel, alongside energy density)
+gives the network a more direct signal and closes the gap.
+
+Regenerated the full 400-event/4-centrality dataset with `RootBulkWriter`
+writing 5 features (energy_density, temperature, vx, vy, vz) instead of 4,
+same original coarse grid as runs A/B/C. Two real bugs were found and fixed
+along the way (see `js-contrib` commit `ca8dd84a` cherry-pick for a MUSIC
+grid-boundary re-run flag that was silently truncating every event after
+the first one to touch the transverse grid edge -- cost 0-10% centrality
+37/50 events on the first generation attempt; and a `choose_ntau` fix in
+`train_torch.py` that was padding to the dataset's global max
+`ntau_freezeout`, 113, instead of `tauslice`'s own 70, which OOM'd the
+training run outright). `FnoHydro.cc` was also updated so
+`energy_density_normalization` applies to channel 0 regardless of whether
+temperature is implicit or explicit (previously the explicit-temperature
+code path silently skipped normalization entirely, a latent bug that would
+have corrupted this exact experiment).
+
+398 clean events after the `ntau_freezeout` filter, 30 epochs, otherwise
+identical settings to run B (`hidden_channels: 16`, `n_modes: [32,32,16,16]`,
+`tauslice: 70`). Final eval l2: **0.7385** vs run B's 0.627 -- worse, though
+not a clean apples-to-apples number since the loss now averages over 5
+channels instead of 4 (if the network simply finds temperature harder to
+fit than velocity, that alone raises the aggregate number without saying
+anything about energy-density quality).
+
+The number that actually matters -- the matched-seed (seed=424242, 30-40%
+centrality) live comparison against real MUSIC -- settles it independently
+of that ambiguity:
+
+| tau (fm/c) | Real MUSIC (MeV) | Run D, explicit T (MeV) | Gap (MeV) |
+|---|---|---|---|
+| 0.44 | 383.2 | 381.5 | 1.7 |
+| 1 | 297.7 | 236.5 | 61.2 |
+| 2 | 239.6 | 164.1 | 75.5 |
+| 3 | 201.3 | 139.6 | 61.7 |
+| 4 | 180.5 | 134.8 | 45.7 |
+| 5 | 167.1 | 120.8 | 46.2 |
+| 6 | 157.3 | 109.0 | 48.3 |
+| 7 | 148.5 | 85.9 | 62.5 |
+
+The initial condition matches real MUSIC almost exactly (1.7 MeV at
+tau=0.44), confirming the IC and normalization are both still correct. But
+the mid-evolution gap is now 45-75 MeV, **larger** than the 20-40 MeV this
+same comparison showed for runs A/B/C with implicit (EOS-derived)
+temperature. Consistent with the eval l2 regression above: adding an
+explicit temperature channel did not help and made the live comparison
+measurably worse, not better.
+
+**Refuted** (in the "made it worse" sense, not merely "no effect"): deriving
+temperature from the EOS was not masking a recoverable signal that an
+explicit channel could capture -- if anything, giving the network a second
+target to fit alongside energy density hurt the fit that matters more.
+
+Artifacts: `checkpoints_run_d_temperature/traced_fno_v3_temperature.pt`,
+live-test configs `fno_3d_live_test_v3_temperature.xml` /
+`fno_3d_live_test_v3_music.xml` in
+`X-SCAPE/external_packages/js-contrib/contribs/FnoHydro/config/`.
+
 ## Open issue carried forward
 
-Mid-evolution (tau 2-6 fm/c) systematic under-prediction of ~20-40 MeV
-relative to real MUSIC on an identical initial condition (true matched-seed
-comparison, not a coincidental one), consistent across data scale (runs
-A/B), model capacity (run C), and now also grid resolution -- all four
-ruled out. Remaining candidates: loss function behavior in this specific
-regime, the normalization scheme's own structure, or some other mismatch
-between the training data pipeline and the live inference pipeline not yet
-identified.
+Mid-evolution (tau 2-6 fm/c) systematic under-prediction relative to real
+MUSIC on an identical initial condition (true matched-seed comparison, not
+a coincidental one), consistent across data scale (runs A/B), model
+capacity (run C), grid resolution, and now explicit-vs-implicit temperature
+(run D, which made it worse rather than better) -- five hypotheses tested,
+none have closed it. Remaining candidates: loss function behavior in this
+specific regime, the normalization scheme's own structure, or some other
+mismatch between the training data pipeline and the live inference
+pipeline not yet identified.

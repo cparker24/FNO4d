@@ -1,0 +1,43 @@
+# ---------------------------------------------------------------------------
+# Small validation run: 20-event, temperature-channel dataset
+# (AuAu_20ev_30_40_withT.root, nFeatures=5: ed, T, vx, vy, vz, original
+# coarse grid). Purpose: confirm the 5-feature pipeline trains end-to-end
+# before committing to a full 400-event regeneration. Separate odir/
+# model_dir so this doesn't clobber run B's benchmark outputs in ./out.
+# ---------------------------------------------------------------------------
+
+data_source: local
+
+odir:      ./out_temp_channel_test
+model_dir: ./checkpoints_temp_channel_test
+
+input_dir: ../../rootfiles
+input_files:
+  - AuAu_20ev_30_40_withT.root
+
+nevents_in: -1
+
+normalization:
+  name: etau75_3d
+  alpha: 1.0
+
+train_ratio: 0.8
+xyslice:  [null, -1]
+etaslice: [null, -1]
+tauslice: [null, 70]
+
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]
+
+n_epochs: 30
+batch_size: 1
+checkpoint_freq: null
+min_save_epoch:  null
+save_last: true
+eval_interval: 2
+test_batch_sizes: [4]
+
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+log_directly: true
