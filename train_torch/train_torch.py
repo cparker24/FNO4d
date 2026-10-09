@@ -174,8 +174,17 @@ log(f'Events called for {nevents_in}')
 if not input_files:
     raise ValueError("No data found in the specified input files.")
 
+# read_3d_data pads every event to choose_ntau tau steps *before* tauslice is
+# applied below. Left to auto-detect, choose_ntau is the global max
+# ntau_freezeout across all events -- which can be far larger than what
+# tauslice actually keeps (e.g. 0-10% centrality events freeze out much later
+# than peripheral ones), wasting memory on tau steps that get sliced off
+# immediately after. Pad only to what tauslice.stop will keep instead.
+choose_ntau = tauslice.stop if isinstance(tauslice.stop, int) and tauslice.stop > 0 else None
+log(f'choose_ntau (pre-slice padding target): {choose_ntau}')
+
 if data_source == 'local':
-    arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, local_rank=None)
+    arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None)
 
 elif data_source == 'gcs_download':
     log(f'Downloading {len(input_files)} file(s) from GCS ...')
@@ -187,11 +196,11 @@ elif data_source == 'gcs_download':
     log(f'Download complete in {perf_counter() - t_dl:.1f}s')
     for gs_uri, local_path in zip(input_files, local_files):
         log(f'  {gs_uri}  →  {local_path}')
-    arr_data = read_3d_data(local_files, nevents=nevents_in, local_rank=None)
+    arr_data = read_3d_data(local_files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None)
 
 else:  # gcs_stream
     storage_options = get_gcs_storage_options(gcs_key_file)
-    arr_data = read_3d_data(input_files, nevents=nevents_in, local_rank=None, storage_options=storage_options)
+    arr_data = read_3d_data(input_files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, storage_options=storage_options)
 
 log('Data parameters from input file:')
 for key in arr_data.keys():
