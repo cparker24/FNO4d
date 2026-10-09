@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# FNO eval-GCS configuration -- run D (temperature-channel model)
+# Used to check whether the mid-evolution cooling gap seen in the live
+# X-SCAPE matched-seed comparison also shows up in offline evaluation
+# against the model's own held-out verification split.
+# ---------------------------------------------------------------------------
+
+gcs_key_file: ../train_generic/fnotest-wayne-gcs.json
+
+model_access: local
+model_dir: ../train_torch/checkpoints_run_d_temperature
+
+train_config: ../train_torch/checkpoints_run_d_temperature/config.yaml
+
+data_access: local
+
+# Commented out -- uses the training config's own 8-file list, now loaded
+# in full since the load_data() single-file bug (file0 instead of
+# load_paths) was fixed.
+# data_files:
+
+data_format: auto
+
+use_train_split: true
+
+nevents: -1
+
+data_local_cache: ./cache/data
+gcs_overwrite_cache: false
+gcs_show_progress: null
+
+backend: torch
+checkpoint_type: best
+checkpoint_epoch: 10
+eval_batch_size: 4
+
+eval_mode: cont
+active_threshold: 0.3
+metric_backend: torch
+
+odir: ./out_run_d

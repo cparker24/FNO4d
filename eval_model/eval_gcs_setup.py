@@ -291,7 +291,14 @@ def load_data(eval_cfg: dict, gcs_fs, gcs_key: Optional[str],
         h5_arg = load_paths if len(load_paths) > 1 else load_paths[0]
         raw = read_3d_data_hdf5(h5_arg, nevents=nevents_load, lazy=True)
     else:
-        raw = read_3d_data(file0, nevents=nevents_load, storage_options=so)
+        root_arg = load_paths if len(load_paths) > 1 else load_paths[0]
+        # Pad only to what tauslice keeps, not the dataset's global max
+        # ntau_freezeout (see train_torch.py's identical fix) -- a longer-
+        # lived centrality bin anywhere in the file list otherwise inflates
+        # the pre-slice buffer far past what's actually used and can OOM.
+        choose_ntau = tauslice.stop if isinstance(tauslice.stop, int) and tauslice.stop > 0 else None
+        raw = read_3d_data(root_arg, nevents=nevents_load, choose_ntau=choose_ntau,
+                           storage_options=so)
 
     grid = {
         k: raw[k]
@@ -300,7 +307,21 @@ def load_data(eval_cfg: dict, gcs_fs, gcs_key: Optional[str],
     }
     print('Grid:', {k: f'{v:.4g}' for k, v in grid.items()})
 
-    arr     = raw['arr']
+    # Drop the same blank/near-blank events train_torch.py excludes before
+    # splitting, so the boundary below lands on the same n_train index and
+    # "test split" actually matches what training held out -- otherwise a
+    # dataset with dropped events (e.g. MUSIC crashes) silently shifts the
+    # split and can leave near-zero-norm events in the eval set.
+    min_ntau_freezeout = train_cfg.get('min_ntau_freezeout', 10)
+    if 'ntau_freezeout' in raw:
+        good_event_mask = raw['ntau_freezeout'] >= min_ntau_freezeout
+        n_dropped = int((~good_event_mask).sum())
+        if n_dropped > 0:
+            print(f'Dropping {n_dropped}/{len(good_event_mask)} event(s) with '
+                  f'ntau_freezeout < {min_ntau_freezeout} (matches train_torch.py)')
+        arr = raw['arr'][good_event_mask]
+    else:
+        arr = raw['arr']
     n_train = int(arr.shape[0] * train_ratio)
     if use_split:
         data_test = arr[n_train:][:, :, xyslice, xyslice, etaslice, tauslice]
@@ -357,7 +378,8 @@ def load_normalizer(eval_cfg: dict, gcs_fs, model_dir_resolved: str):
 # Stage 7: model
 # ---------------------------------------------------------------------------
 
-def load_model(eval_cfg: dict, gcs_fs, model_dir_resolved: str, train_cfg: dict):
+def load_model(eval_cfg: dict, gcs_fs, model_dir_resolved: str, train_cfg: dict,
+              n_features: int = 4):
     model_access    = eval_cfg.get('model_access',    'local')
     backend_cfg     = eval_cfg.get('backend',         'torch')
     ckpt_type       = eval_cfg.get('checkpoint_type', 'best')
@@ -423,7 +445,7 @@ def load_model(eval_cfg: dict, gcs_fs, model_dir_resolved: str, train_cfg: dict)
             }
 
         model = FNO(
-            in_channels=4, out_channels=4,
+            in_channels=n_features, out_channels=n_features,
             n_modes=n_modes, hidden_channels=hidden_channels,
             projection_channel_ratio=2,
         ).to(device)
@@ -453,7 +475,7 @@ def load_model(eval_cfg: dict, gcs_fs, model_dir_resolved: str, train_cfg: dict)
             rel_pt = f'checkpoint_{epoch}/best_model_state_dict.pt'
 
         model = FNO(
-            in_channels=4, out_channels=4,
+            in_channels=n_features, out_channels=n_features,
             n_modes=n_modes, hidden_channels=hidden_channels,
             projection_channel_ratio=2,
         )
@@ -528,7 +550,8 @@ def run_all(cfg_path: Optional[str] = None) -> EvalContext:
     model_dir_resolved = resolve_model_dir(eval_cfg, gcs_fs, gcs_key)
     data_test, grid    = load_data(eval_cfg, gcs_fs, gcs_key, storage_opts, train_cfg)
     normalizer         = load_normalizer(eval_cfg, gcs_fs, model_dir_resolved)
-    model, device, backend     = load_model(eval_cfg, gcs_fs, model_dir_resolved, train_cfg)
+    model, device, backend     = load_model(eval_cfg, gcs_fs, model_dir_resolved, train_cfg,
+                                            n_features=data_test.shape[1])
     batch_size         = int(eval_cfg.get('eval_batch_size', 8))
     model_out_phys, y_true_phys = run_inference(
         model, backend, device, data_test, normalizer, batch_size)
