@@ -229,3 +229,72 @@ timing -- six hypotheses tested, none have closed it. Remaining candidates:
 loss function behavior in this specific regime, the normalization scheme's
 own structure, or some other mismatch between the training data pipeline
 and the live inference pipeline not yet identified.
+
+## Offline held-out evaluation: the gap is NOT in the model (pivotal finding)
+
+Does the mid-evolution gap show up in pure offline evaluation -- model
+predictions vs. ground truth on the training pipeline's own held-out
+verification split, no X-SCAPE/MUSIC live run involved at all? This is the
+one check that can tell "something about what the model learned" apart
+from "something about the live inference pathway," and it had never
+actually been run: `eval_model/eval_gcs_clean.ipynb`'s backend
+(`eval_gcs_setup.py`) had three latent bugs that silently blocked exactly
+this check for any multi-file, multi-channel run (found while adapting it
+for run D, since run D is both):
+
+- `load_data()` built the full multi-file path list but then called
+  `read_3d_data(file0, ...)` -- always loading only the *first* file. Every
+  past evaluation of a multi-file training run (B, C, D) silently checked
+  against file 0's own internal 80/20 split, never the real held-out set.
+- `load_data()` never applied train_torch.py's `ntau_freezeout` filter
+  before computing the split boundary, so a dataset with dropped events
+  shifts the split and can leave near-blank events in the eval set.
+- `load_model()` hardcoded `in_channels=4, out_channels=4` in both the
+  torch and MLX branches -- a hard crash (state_dict shape mismatch)
+  against any checkpoint trained with a different channel count, which is
+  exactly why this had never been tried against run D.
+- (same family as train_torch.py's OOM fix) `read_3d_data()` wasn't passed
+  `choose_ntau`, so it auto-padded to the dataset's global max
+  `ntau_freezeout` instead of what `tauslice` keeps.
+
+All four fixed (`eval_model/eval_gcs_setup.py`), then run against run D's
+checkpoint and its own 80-event held-out split (398 events, 8 files, 5
+channels -- the exact data that model trained and verified against):
+
+| | Energy density (channel 0) | Temperature (channel 1) |
+|---|---|---|
+| Mean error, tau 2-6 fm/c, 80 events | 0.6% relative | 1.2 MeV |
+| Worst single event, tau 2-6 fm/c | 7.4% relative | 3.7 MeV |
+| Events with mean gap > 20 MeV | -- | **0 / 80** |
+
+Zero of the 80 held-out events comes anywhere near the 45-75 MeV gap the
+live matched-seed comparison shows against real MUSIC. The model, evaluated
+exactly the way it was trained and verified, reproduces held-out ground
+truth almost perfectly -- averaged across all 80 events the curves agree to
+within 1-3 MeV through the entire physical window (only the very last tau
+step, right at the window edge, shows a large deviation, consistent with
+the known freeze-out-edge zero-padding artifact, not a physics failure).
+
+**This reframes the whole investigation.** All six hypotheses above were
+tested against "what's wrong with the model or its training data" --
+but the model itself is demonstrably accurate on data drawn from the same
+distribution it was trained on. The 45-75 MeV live-comparison gap must be
+introduced somewhere in the live X-SCAPE/FnoHydro.cc inference pathway
+specifically -- something that differs between "replay a held-out
+training-distribution event through the Python eval harness" and "run the
+live pipeline (fresh MCGlauber + PreEq-constructed IC, C++ tensor
+construction, FnoHydro.cc's own window/rollout handling) end to end" --
+not a limitation of what the network learned. The k=0 initial condition
+matching real MUSIC to ~2% (Run D section above) shows the IC handoff
+itself is close but doesn't rule out a subtler mismatch in exactly how
+FnoHydro.cc rebins the PreEq grid onto the FNO grid, or in how it derives
+the live IC's temperature channel (`GetTemperatureFromEos(ed)`, dependent
+on `fnoEOS`) versus what MUSIC's own EOS wrote into training data's
+temperature channel at that same cell. Next step: compare the live
+pathway's constructed IC tensor directly against the corresponding
+held-out ROOT event's own recorded IC, cell by cell, rather than only its
+peak value.
+
+Artifacts: `eval_model/eval_gcs_config_run_d.yaml`,
+`checkpoints_run_d_temperature/` held-out predictions reproducible via
+`eval_gcs_setup.run_all('eval_gcs_config_run_d.yaml')`.
