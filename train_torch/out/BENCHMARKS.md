@@ -431,3 +431,48 @@ model vs real MUSIC, seed=424242, 30-40% centrality) with this fix in
 place, to measure how much of the 45-75 MeV gap closes.
 
 Artifacts: `js-contrib` commit `87c3a0f` (`wip/fno-hydro-3d-plus1`).
+
+## Gap closed: full matched-seed re-verification
+
+Re-ran the matched-seed comparison (seed=424242, 30-40% centrality, run D's
+temperature-channel model) with the `MusicPrimedPreEq` fix in place:
+
+| tau (fm/c) | Real MUSIC (MeV) | FNO, buggy (MeV) | Gap, buggy | FNO, fixed (MeV) | Gap, fixed |
+|---|---|---|---|---|---|
+| 0.44 | 383.2 | 381.5 | 1.7 | 381.7 | 1.5 |
+| 1 | 297.7 | 236.5 | 61.2 | 298.9 | -1.2 |
+| 2 | 239.6 | 164.1 | 75.5 | 241.3 | -1.7 |
+| 3 | 201.3 | 139.6 | 61.7 | 204.6 | -3.3 |
+| 4 | 180.5 | 134.8 | 45.7 | 182.2 | -1.7 |
+| 5 | 167.1 | 120.8 | 46.2 | 170.0 | -2.9 |
+| 6 | 157.3 | 109.0 | 48.3 | 160.7 | -3.4 |
+| 7 | 148.5 | 85.9 | 62.5 | 144.2 | 4.2 |
+
+**The gap is closed.** 45-75 MeV down to 1-4 MeV across the entire
+evolution, matching the ~1-3 MeV noise floor already seen in offline
+held-out evaluation. Six hypotheses tested across this investigation
+(normalization -- real bug, fixed, but not the mid-evolution driver; data
+quantity; model capacity; grid resolution; explicit temperature channel;
+pre-equilibrium deposition timing) all turned up real, worthwhile findings
+but didn't explain the gap, because none of them touched the actual fault:
+a fill-order mismatch between `MusicPrimedPreEq` and `GetPreqCellIndex`
+that scrambled every live initial condition's spatial layout while leaving
+its aggregate statistics (peak value) looking fine -- exactly the one
+property every prior peak-value comparison in this document checked.
+
+Caveat worth flagging for the next step: this re-verification used run D's
+explicit-temperature model (the one trained and exported most recently),
+not one of the implicit-temperature models (A/B/C) the bulk of the earlier
+negative-feeling comparisons were run against. Those comparisons (BENCHMARKS
+sections for runs A/B/C, the capacity experiment, and the original
+normalization-bug fix) were **all** generated through the same buggy
+`MusicPrimedPreEq` path and should be treated as unreliable for anything
+beyond the specific things they were individually testing for via means
+other than the live comparison (e.g. the normalization fix was independently
+confirmed via the k=0 IC match and the offline/held-out checks, which don't
+depend on this bug). The run D vs run B "worse eval l2" conclusion also
+still stands on its own (that's a pure training-metric comparison, untouched
+by this bug) -- but run D's live-comparison numbers in the "explicit
+temperature channel" section above are now superseded by this corrected
+re-run and should not be read as reflecting a 45-75 MeV gap; they don't,
+once this fix is in place.
