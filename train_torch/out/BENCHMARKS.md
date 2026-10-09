@@ -353,3 +353,81 @@ Artifacts: `/tmp/compare_export_cpu.py`-style check (ad hoc, not committed
 -- rerun by loading `best_model_state_dict.pt` and
 `traced_fno_v3_temperature.pt` with matching `in_channels`/`n_modes` and
 comparing on identical CPU input).
+
+## Root cause found: MusicPrimedPreEq fill-order bug
+
+Added a temporary diagnostic to `FnoHydro::EvolveHydro()` dumping the
+constructed IC tensor (pre-repeat) to a file, re-ran the matched-seed live
+test (seed=424242, 30-40%), and compared its k=0 energy-density/temperature
+slice cell-by-cell against the same physical event's own recorded IC in
+`AuAu_50ev_30_40_withT-1.root` (event 0, confirmed as the same collision:
+ed_max 36.14 vs the live arm's 35.83 GeV/fm^3, matching within normal
+run-to-run floating-point noise between independent MUSIC invocations).
+
+Peak *values* agreed closely, but peak *locations* did not: live argmax at
+grid cell (30, 56, 10), reference at (35, 26, 5) -- a massive spatial
+discrepancy (the y-index alone off by 30 of 64 cells) despite near-identical
+magnitudes. Checked every simple flip/transpose of the live array against
+the reference; none scored above a baseline ~0.08 correlation, meaning this
+wasn't a simple axis-swap guess away -- something more specific was wrong.
+
+Found it in `MusicPrimedPreEq.h` (`external_packages/js-contrib/.../example/`),
+the custom module that bridges a "primed" embedded MUSIC instance's state
+into the single-instant snapshot `FnoHydro::EvolveHydro()` reads via
+`pre_eq_ptr->e_[GetPreqCellIndex(...)]`:
+
+- `FnoHydro::GetPreqCellIndex(id_x, id_y, id_eta)` computes
+  `id_x*ny*neta + id_y*neta + id_eta` -- **eta fastest-varying** -- by its
+  own comment, deliberately matching FreestreamMilne's established layout
+  *and* `EvolutionHistory::CellIndex` (`FluidEvolutionHistory.h`), the
+  framework-wide convention used everywhere else in the codebase.
+- `MusicPrimedPreEq::EvolvePreequilibrium()` filled `e_` (and the
+  velocity/pressure arrays alongside it) with the loop nested
+  `for eta { for x { for y { push_back(...) } } }` -- **y fastest, eta
+  slowest** -- the opposite convention.
+
+Every single read through `GetPreqCellIndex` was landing on the wrong
+(x,y,eta) cell. Same pool of values going in (so aggregate statistics like
+the peak magnitude looked perfectly reasonable, which is exactly what made
+every prior peak-value-only comparison in this document look fine), but
+scrambled locations (so the actual 2D/3D spatial pattern the FNO model was
+asked to evolve bore no resemblance to the real initial condition it was
+trained to recognize).
+
+**Fixed** by reordering `MusicPrimedPreEq`'s fill loop to `for x { for y {
+for eta { ... } } }`, matching `GetPreqCellIndex`'s expected layout.
+Verified directly: argmax location now matches the reference exactly
+`(35, 26, 5)` vs `(35, 26, 5)` (was `(30, 56, 10)` vs `(35, 26, 5)`),
+cell-by-cell correlation 0.08 -> **0.985** (energy density) / **0.994**
+(temperature). Residual ~30% mean relative difference in low-value cells
+away from the peak is consistent with ordinary floating-point/threading
+non-determinism between two independent MUSIC process invocations (the
+training-generation run and the live "priming" run), not a remaining
+structural bug.
+
+This had been flagged before, in the live-test XML's own dated status
+comment (2026-09-22): *"the snapshot it hands FnoHydro is genuinely empty
+... candidates are MUSIC's own source-term integration ... or FnoHydro's
+preeq-to-FNO-grid regridding. See MusicPrimedPreEq.h."* That note describes
+a fully-zero snapshot (evidently already partially fixed by the time this
+investigation resumed, since the snapshot we found was non-zero, just
+scrambled) -- but correctly named the exact file and the exact class of bug
+months before this session tracked it down with a cell-by-cell comparison
+against a matched reference event.
+
+**This is very likely the major contributor to the entire mid-evolution
+cooling gap this whole investigation has been chasing.** Every hypothesis
+tested before this one (runs A-D, pre-equilibrium deposition timing, model
+export) was implicitly built on the assumption that the live IC matched
+what the model trained on, checked only by comparing peak values -- which
+this bug shows is not a reliable check. The model's own accuracy (offline
+held-out evaluation, essentially perfect) and the export's fidelity (also
+essentially perfect) were both real findings; what was never properly
+checked until now was whether the live pathway was actually handing the
+model a correctly-shaped input in the first place.
+
+Next step: re-run the full matched-seed live comparison (FNO temperature
+model vs real MUSIC, seed=424242, 30-40% centrality) with this fix in
+place, to measure how much of the 45-75 MeV gap closes.
+
+Artifacts: `js-contrib` commit `87c3a0f` (`wip/fno-hydro-3d-plus1`).
