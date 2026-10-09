@@ -298,3 +298,58 @@ peak value.
 Artifacts: `eval_model/eval_gcs_config_run_d.yaml`,
 `checkpoints_run_d_temperature/` held-out predictions reproducible via
 `eval_gcs_setup.run_all('eval_gcs_config_run_d.yaml')`.
+
+## Is it the model export/tracing step? (tested, refuted)
+
+Natural next suspect: `export_torchscript.py` traces the model with
+`torch.jit.trace()` on a random-noise example tensor, and tracing a model
+with any data-dependent control flow can silently diverge from the eager
+model on real inputs even when the export script's own sanity check (same
+random-noise example) reports zero difference. The exported model is also
+the one artifact in the whole pipeline that's genuinely different between
+the offline-eval path (section above, eager PyTorch) and the live path
+(C++/libtorch loading the traced `.pt` file) -- so it was the obvious place
+to look after ruling out the model's learned behavior.
+
+First finding, independent of tracing: `FnoHydro::InitializeHydro()` has its
+CUDA/MPS device-selection code entirely commented out, with the prior
+developer's own remark left in place -- *"Same issue as with tracing, not
+everything in FNO model gets moved to the proper other device"*. The model
+is loaded and run on CPU unconditionally, every time, regardless of GPU
+availability. Confirmed this is a real, reproducible issue independently
+while testing: calling the eager model fresh on GPU crashes with a device
+mismatch (`cuda:0` vs `cpu`) inside `positional_embedding`, which lazily
+caches a coordinate-grid tensor that `model.to(device)` doesn't move. This
+is exactly the kind of data-independent-but-shape-dependent caching the
+export script's own `TracerWarning`s flagged (`if self._grid is None or
+self._res != spatial_dims`) -- it gets baked into the traced graph as a
+constant on whatever device was active at trace time. Moot for the actual
+bug, though: since live inference never leaves CPU, this device-mismatch
+class of bug can't be what's producing the live gap.
+
+Tested the tracing itself directly: loaded the *exact* `.pt` file shipped
+to X-SCAPE (`traced_fno_v3_temperature.pt`) alongside the eager model with
+its original state dict, both pinned to CPU (`torch::set_num_threads(1)`,
+matching `FnoHydro.cc`), and fed both the identical input tensor built from
+5 real held-out events (not random noise):
+
+```
+Event 0: eager vs traced(cpu) max abs diff = 0.000000e+00  (every channel)
+Event 1-4: same, 0.000000e+00
+```
+
+**Refuted, cleanly**: on the device the live pathway actually uses, the
+traced model is bit-identical to the eager model on real data. Exporting
+isn't where the mismatch comes from.
+
+This narrows things further: the model is correct (previous section), and
+the exported artifact of that model is correct. What's left is how
+`FnoHydro.cc` builds the input tensor it hands to that model (rebinning the
+PreEq grid onto the FNO grid, which is a different code path than how
+`RootBulkWriter` captured training data from MUSIC's own output grid) and
+how it reads the output back -- not the model or its export.
+
+Artifacts: `/tmp/compare_export_cpu.py`-style check (ad hoc, not committed
+-- rerun by loading `best_model_state_dict.pt` and
+`traced_fno_v3_temperature.pt` with matching `in_channels`/`n_modes` and
+comparing on identical CPU input).
