@@ -181,14 +181,51 @@ live-test configs `fno_3d_live_test_v3_temperature.xml` /
 `fno_3d_live_test_v3_music.xml` in
 `X-SCAPE/external_packages/js-contrib/contribs/FnoHydro/config/`.
 
+## Pre-equilibrium deposition timing (tested, refuted)
+
+Hypothesis: if MUSIC's string-energy deposition hasn't fully finished by
+tau0 (~0.44 fm/c, when the IC snapshot is handed to FNO), the model would
+start from an IC that's missing real energy -- a systematic deficit it
+could never recover from, which would show up as exactly the kind of
+persistent mid-evolution under-prediction seen here.
+
+Checked directly against `HydroSourceStrings::prepare_list_for_current_tau_frame`'s
+own source-term bookkeeping (`QCD_strings_list_current_tau`, the same
+container `get_hydro_energy_source` reads to actually inject energy -- not
+a separate diagnostic that could drift from the real physics), which logs
+the number of strings still actively depositing at each tau step. Checked
+across 200 events spanning every centrality bin used in training (0-10%
+through 30-40%, including the live-test's own matched-seed event):
+
+```
+grep "hydro_source: tau = 0.44 fm" <every generation log> | <count active strings>
+-> 0 active strings for energy density, 200/200 events, zero exceptions
+```
+
+Each string's deposition window depends on `cosh(eta_s - eta_s_0)` (wider
+rapidity-span strings take longer to finish depositing across their full
+extent), so this completion isn't guaranteed by construction -- it's an
+empirical property of these events, confirmed by direct measurement rather
+than assumed from the parameterization. 0-10% centrality (highest string
+multiplicity, widest kinematic spread -- the case most likely to have a
+late-finishing outlier string) shows the same clean zero count as every
+other bin.
+
+**Refuted**: by tau0, every string in every event checked has already
+finished depositing its energy. The FNO's IC snapshot isn't missing energy
+from incomplete deposition. (Net baryon/electric-charge sources, tracked
+separately, do show a few residual active strings at tau0 in some events --
+but that's baryon/charge-specific and doesn't touch energy density or
+temperature, so it doesn't bear on this comparison.)
+
 ## Open issue carried forward
 
 Mid-evolution (tau 2-6 fm/c) systematic under-prediction relative to real
 MUSIC on an identical initial condition (true matched-seed comparison, not
 a coincidental one), consistent across data scale (runs A/B), model
-capacity (run C), grid resolution, and now explicit-vs-implicit temperature
-(run D, which made it worse rather than better) -- five hypotheses tested,
-none have closed it. Remaining candidates: loss function behavior in this
-specific regime, the normalization scheme's own structure, or some other
-mismatch between the training data pipeline and the live inference
-pipeline not yet identified.
+capacity (run C), grid resolution, explicit-vs-implicit temperature (run D,
+which made it worse rather than better), and now pre-equilibrium deposition
+timing -- six hypotheses tested, none have closed it. Remaining candidates:
+loss function behavior in this specific regime, the normalization scheme's
+own structure, or some other mismatch between the training data pipeline
+and the live inference pipeline not yet identified.
