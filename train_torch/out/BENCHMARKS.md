@@ -678,3 +678,32 @@ cases favor FNO now, not just the latter.
 Artifacts: `js-contrib` commit `1e98c99` (`wip/fno-hydro-3d-plus1`);
 timing logs `fno_threads_{0_10,10_20,20_30}.log`, `fno_threads_test.log`
 (30-40%) in the container's `X-SCAPE/build/` working directory.
+
+## Thread-count output consistency check
+
+Before trusting the threading fix above, checked whether running the
+model at different thread counts changes its *output*, not just its
+speed -- intra-op parallelism (matmuls, FFTs) can legitimately produce
+tiny differences from non-associative floating-point summation order
+across threads, so this isn't a given.
+
+Fed the exact same real held-out event (fixed input, not random noise) to
+the traced model at every thread count tested above (1 through 48),
+comparing each against the single-threaded baseline:
+
+| Threads | max abs diff | max rel diff | mean abs diff |
+|---|---|---|---|
+| 1 (baseline) | 0 | 0 | 0 |
+| 2-48 | 3.815e-06 | 6.509 | 7.266e-08 |
+
+The "6.509 max relative diff" looks alarming in isolation but is a
+division-by-near-zero artifact (back-calculated baseline value ~5.9e-7,
+likely a velocity channel or near-freeze-out-edge cell) -- not a real
+discrepancy. The numbers that matter: mean abs diff across the whole
+tensor is 7.3e-8, and the physical sanity check (denormalized peak energy
+density at k=0) shows 43.161076 GeV/fm^3 at 1 thread vs 43.161072 at every
+other thread count tested -- a ~9e-8 relative difference, eight orders of
+magnitude below anything treated as meaningful anywhere else in this
+investigation. Consistent with ordinary floating-point non-associativity
+in parallel reductions, not a correctness issue. The threading fix is
+numerically safe.
