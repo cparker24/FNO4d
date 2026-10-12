@@ -625,3 +625,56 @@ Artifacts: timing logs `fno_timing_{0_10,10_20,20_30}.log`,
 `fno_cutoff_test.log` (30-40%), `music_timing_{0_10,10_20,20_30}.log`,
 `music_v3_livetest.log` (30-40%) in the container's
 `X-SCAPE/build/` working directory.
+
+## Corrected: FnoHydro was hardcoded single-threaded (fixed)
+
+The timing comparison above undersold FNO. `FnoHydro::InitializeHydro()`
+called `torch::set_num_threads(1)` unconditionally, overriding
+`OMP_NUM_THREADS` -- the same env var MUSIC's own threading already
+respects elsewhere in this project -- regardless of what the caller
+wanted, based on a code comment claiming "no real improvement" from more
+threads.
+
+Measured directly with a standalone forward-pass microbenchmark (the
+restored original-setup model, real traced `.pt` file, matching
+`FnoHydro.cc`'s exact input shape) across thread counts 1-48 on this
+machine (AMD Threadripper 3960X: 24 physical cores, 48 logical via SMT):
+
+| Threads | 1 | 2 | 4 | 8 | 16 | 24 | 32 | 48 |
+|---|---|---|---|---|---|---|---|---|
+| forward() time | 31.3s | 23.8s | 14.2s | 10.2s | 8.1s | **7.7s** | 8.0s | 8.3s |
+
+A real ~4x speedup at the physical core count (24), directly contradicting
+the old comment -- and going past physical cores to the full 48 logical
+(SMT) threads is slightly *worse*, not better, from oversubscription
+overhead. Removed the hardcoded override entirely (rather than hardcoding
+a different value) so thread count is under the caller's control via
+`OMP_NUM_THREADS`, since the right number is a property of the deployment
+machine, not the model.
+
+## MUSIC vs FNO+iSS: corrected timing comparison
+
+Re-ran the full 4-centrality sweep with `OMP_NUM_THREADS=24` (this fix
+active, freeze-out cutoff and iSS both still active):
+
+| Centrality | FNO wall-clock (24 threads) | MUSIC wall-clock (48 threads) | Speedup |
+|---|---|---|---|
+| 0-10%  | 181s | 395s | 2.18x |
+| 10-20% | 189s | 371s | 1.96x |
+| 20-30% | 179s | 350s | 1.96x |
+| 30-40% | 175s | 308s | 1.76x |
+
+**This supersedes the previous timing section above**, which measured
+FNO at the old hardcoded single-threaded speed (294-562s) and concluded
+wall-clock was roughly a wash with MUSIC actually winning at 0-10%. With
+the thread fix, FNO is consistently **~1.8-2.2x faster in wall-clock
+alone** across every centrality, *in addition to* the already-documented
+12-16x reduction in aggregate CPU-core-seconds (now even larger in
+relative terms, since FNO's own compute dropped too). The combination --
+faster single-event latency *and* far lower aggregate compute cost --
+means both the "one urgent event" and "many events in production" use
+cases favor FNO now, not just the latter.
+
+Artifacts: `js-contrib` commit `1e98c99` (`wip/fno-hydro-3d-plus1`);
+timing logs `fno_threads_{0_10,10_20,20_30}.log`, `fno_threads_test.log`
+(30-40%) in the container's `X-SCAPE/build/` working directory.
