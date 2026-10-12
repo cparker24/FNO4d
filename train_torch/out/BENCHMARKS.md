@@ -585,3 +585,43 @@ four-momenta and positions) in the output file. No XML changes needed --
 parameters for this.
 
 Artifacts: `js-contrib` commit `f62a3da` (`wip/fno-hydro-3d-plus1`).
+
+## MUSIC vs FNO+iSS: timing comparison across all four centralities
+
+With the full pipeline now working end-to-end on both sides (real MUSIC
+via `standardHydroLiveTest3D`, FNO via `fnoHydroLiveTest3D` with the
+freeze-out cutoff and iSS both active), measured single-event wall-clock
+and aggregate CPU time for one event per centrality bin (auto-random seed,
+restored original-setup model for the FNO arm):
+
+| Centrality | FNO wall-clock | MUSIC wall-clock | Wall ratio | FNO CPU-s | MUSIC CPU-s | CPU ratio |
+|---|---|---|---|---|---|---|
+| 0-10%  | 562s | 395s | 0.70x (MUSIC faster) | 561s  | 6767s | 12.1x |
+| 10-20% | 368s | 371s | 1.01x | 368s | 5817s | 15.8x |
+| 20-30% | 337s | 350s | 1.04x | 337s | 5226s | 15.5x |
+| 30-40% | 294s | 308s | 1.05x | 294s | 4415s | 15.0x |
+
+**Wall-clock time for a single event is not dramatically different between
+the two** -- MUSIC is actually faster for 0-10% centrality. `FnoHydro`
+runs single-threaded (`torch::set_num_threads(1)` in `InitializeHydro()`),
+while MUSIC uses all 48 available OpenMP threads; for one event with a
+whole multi-core machine free, MUSIC's parallelism closes nearly the
+entire gap. A large, fixed, single-threaded cost (the mandatory
+50,000-event minimum-bias calibration every run pays regardless of
+backend) also dilutes whatever wall-clock advantage the hydro stage
+itself has.
+
+**The real saving is aggregate compute cost, not single-event latency**:
+FNO uses 12-16x fewer CPU-core-seconds than MUSIC, since it does the same
+job on 1 thread instead of 48. This doesn't show up in a single-event
+wall-clock race, but it's exactly what matters for throughput: a fixed
+48-core machine can only run one 48-thread MUSIC event at a time, while
+it could run on the order of 48 single-threaded FNO events concurrently
+in roughly the same wall-clock -- a throughput gain in the 15-45x range
+for batch/production event generation, not the ~1x the single-event
+comparison alone would suggest.
+
+Artifacts: timing logs `fno_timing_{0_10,10_20,20_30}.log`,
+`fno_cutoff_test.log` (30-40%), `music_timing_{0_10,10_20,20_30}.log`,
+`music_v3_livetest.log` (30-40%) in the container's
+`X-SCAPE/build/` working directory.
