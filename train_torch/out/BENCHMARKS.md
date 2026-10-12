@@ -555,3 +555,33 @@ constructs correctly (277,562 cells). No crashes, no change needed in the
 2D+1 path (the implementation is dimension-agnostic).
 
 Artifacts: `js-contrib` commit `abbe855` (`wip/fno-hydro-3d-plus1`).
+
+## iSS particlization wired into the live pipeline
+
+With the live inference pathway fixed (section above) and the evolution
+now correctly truncated at freeze-out, the next step in the chain is
+Cooper-Frye particlization: converting the freeze-out surface into actual
+sampled hadrons via iSS (iSpectraSampler), the same module real-MUSIC
+pipelines use.
+
+`FnoHydro` needed zero code changes to support this -- it already
+populates `surfaceCellVector_` via the inherited
+`FindAConstantTemperatureSurface()` call at the end of `EvolveHydro()`,
+the same mechanism `MpiMusic` uses. JetScape's signal manager auto-connects
+iSS's `GetHydroHyperSurface` signal to whatever `FluidDynamics`-derived
+task was added as the hydro module, based on task-list membership alone --
+no FnoHydro-specific wiring required. The only thing actually missing was
+that `fnoHydroLiveTest3D.cc`'s driver had `iSpectraSamplerWrapper`
+construction commented out; uncommented it and added `jetscape->Add(iSS)`
+right after `jetscape->Add(hydro)`.
+
+Verified end-to-end on the restored original-setup model (30-40%
+centrality, seed=424242): surface cell count matches exactly between
+FnoHydro's surface finder and iSS's input (277,562 cells both sides),
+`hydro_mode` correctly auto-detects 3D+1 ("Hydro medium is not boost
+invariant"), and iSS produces real sampled hadrons (pions with sensible
+four-momenta and positions) in the output file. No XML changes needed --
+`jetscape_main.xml`'s default `<iSS>` block already provides working
+parameters for this.
+
+Artifacts: `js-contrib` commit `f62a3da` (`wip/fno-hydro-3d-plus1`).
