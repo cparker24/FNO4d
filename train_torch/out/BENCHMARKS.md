@@ -525,3 +525,33 @@ training events' earlier freeze-out edges, not failing on its own).
 Artifacts: `train_torch/checkpoints/traced_fno_original_setup.pt`,
 live-test config `fno_3d_live_test_original_setup.xml` in
 `X-SCAPE/external_packages/js-contrib/contribs/FnoHydro/config/`.
+
+## Freeze-out cutoff: stop predicting past where MUSIC would
+
+Previously, live inference always predicted the full `ntau_fno`-step
+window regardless of whether that event's own freeze-out happened much
+earlier -- training targets are zero-padded past each event's own
+freeze-out, so the live model was extrapolating into territory it never
+saw real targets for. This produced the dip-and-recover ringing artifact
+documented repeatedly above (centrality sweep, section 05 benchmark), and
+fed `bulk_info`/the Cooper-Frye surface finder data from well past where
+the medium should stop being treated as fluid.
+
+Added `FnoHydro::FindFreezeoutCutoff()`: scans the finished output tensor
+step by step for the first tau at which the hottest cell anywhere in the
+grid is at/below `freezeout_temperature`, and truncates `bulk_info.ntau`
+there (+1, so the surface finder gets one step at/below threshold to
+bracket against, matching MUSIC's own surface construction) instead of
+always spanning the full predicted window. The diagnostic CSV
+(`WritePeakTemperatureDiagnostics`) still writes the model's complete raw
+prediction, ringing included, for debugging -- only `bulk_info` (and
+everything downstream of it) gets the cutoff.
+
+Verified on the restored original-setup model (30-40% centrality,
+seed=424242): cutoff fires at tau=7.04 fm/c (step 66 of 99), `bulk_info.ntau`
+truncates from 100 to 67, fluid-cell count matches exactly
+(67 * 64 * 64 * 16 = 4,390,912), and the freeze-out surface still
+constructs correctly (277,562 cells). No crashes, no change needed in the
+2D+1 path (the implementation is dimension-agnostic).
+
+Artifacts: `js-contrib` commit `abbe855` (`wip/fno-hydro-3d-plus1`).
