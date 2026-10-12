@@ -476,3 +476,52 @@ by this bug) -- but run D's live-comparison numbers in the "explicit
 temperature channel" section above are now superseded by this corrected
 re-run and should not be read as reflecting a 45-75 MeV gap; they don't,
 once this fix is in place.
+
+## Confirmed on the original setup too: implicit temperature, 200 events
+
+Retrained run A's exact original configuration (200 events -- one 50-event
+file per centrality, 0-10/10-20/20-30/30-40, all 4-feature/implicit-
+temperature data; original coarse grid; `tauslice: 100`; no explicit
+temperature channel) to get a trustworthy baseline now that the
+`MusicPrimedPreEq` fix (and every other fix found this session) is in
+place. Final eval l2 **0.9598** at epoch 28, matching run A's historical
+0.969 almost exactly (total time 3460.6s vs 3488s) -- confirms the
+`choose_ntau` fix doesn't change training behavior when it has nothing to
+correct for (single-centrality-range dataset here, so the global-max and
+tauslice-driven padding targets were already close).
+
+Hit the same `test_batch_sizes`-driven CUDA OOM as run D on the first
+attempt (`tauslice=100` here vs run D's 70 pushes eval memory higher than
+`test_batch_sizes: 5` can fit); same fix applied (`test_batch_sizes: 2`,
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`).
+
+Exported (4 channels, ntau=99) and ran the matched-seed live comparison
+(seed=424242, 30-40% centrality) with the `MusicPrimedPreEq` fix active:
+
+| tau (fm/c) | Real MUSIC (MeV) | FNO, original setup (MeV) | Gap (MeV) |
+|---|---|---|---|
+| 0.44 | 383.2 | 381.7 | 1.5 |
+| 1 | 297.7 | 290.9 | 6.9 |
+| 2 | 239.6 | 237.4 | 2.2 |
+| 3 | 201.3 | 203.4 | -2.1 |
+| 4 | 180.5 | 180.7 | -0.2 |
+| 5 | 167.1 | 168.1 | -1.0 |
+| 6 | 157.3 | 157.4 | -0.1 |
+| 7 | 148.5 | 124.2 | 24.2 |
+| 8 | 140.5 | 83.4 | 57.1 |
+
+Mid-evolution (tau 0.44-6, the range this entire investigation was chasing)
+is now within **1-7 MeV** -- the fix generalizes beyond run D's explicit-
+temperature model to the original implicit-temperature setup, as expected
+for a bug in the shared live-inference pathway rather than anything
+model-specific. The larger gap at tau 7-8 is a different, already-
+documented artifact, not a relapse of the scrambling bug: the FNO curve
+shows a sharp cliff right around tau~7 (0.146 GeV at 6.94 -> 0.124 at 7.04
+-> 0.084 at 7.14), consistent with the previously-documented post-freeze-
+out zero-padding-edge ringing (this event's real freeze-out per real MUSIC
+is tau=8.76, so the model is extrapolating into territory shaped by *other*
+training events' earlier freeze-out edges, not failing on its own).
+
+Artifacts: `train_torch/checkpoints/traced_fno_original_setup.pt`,
+live-test config `fno_3d_live_test_original_setup.xml` in
+`X-SCAPE/external_packages/js-contrib/contribs/FnoHydro/config/`.
