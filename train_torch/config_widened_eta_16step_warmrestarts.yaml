@@ -1,0 +1,106 @@
+# ---------------------------------------------------------------------------
+# FNO training config — pure PyTorch
+#
+# Usage:
+#   python train_torch.py [--config config.yaml]
+#
+# One key selects the data source:
+#
+#   data_source: local | gcs_download | gcs_stream
+#
+# Keys marked [local]    are only read when data_source is local.
+# Keys marked [gcs]      are read for gcs_download and gcs_stream.
+# Keys marked [download] are only read when data_source is gcs_download.
+# ---------------------------------------------------------------------------
+
+# --- mode selection ---
+data_source: local        # local | gcs_download | gcs_stream
+
+# --- output ---
+# Same data/grid/epoch budget as config_widened_eta_16step.yaml -- the only
+# difference is the LR schedule below -- so this is a direct comparison
+# against that run (single cosine decay, final train_loss=0.629,
+# eval plateaued ~epoch 30 at l2~1.24) rather than a new experiment.
+odir:      ./out_widened_eta_16step_warmrestarts
+model_dir: ./checkpoints_widened_eta_16step_warmrestarts
+
+# --- input data ---
+# [local] directory prepended to each entry in input_files
+input_dir: ../../rootfiles
+
+# Widened-eta, power-of-2+1 grid testbed (eta_min=-2.0, deta=0.125, neta=33
+# raw -- see js-contrib contribs/FnoHydro/PARTICLIZATION_INVESTIGATION.md).
+# 0-10% file has one bad event (ntau_freezeout=2; MUSIC hit its transverse
+# grid boundary and truncated) -- dropped automatically below by the
+# existing min_ntau_freezeout filter, not by editing the file.
+input_files:
+  - AuAu_50ev_0_10_eta2_n33.root
+  - AuAu_50ev_10_20_eta2_n33.root
+  - AuAu_50ev_20_30_eta2_n33.root
+  - AuAu_50ev_30_40_eta2_n33.root
+
+nevents_in: -1            # events to load (-1 = all)
+
+# --- GCS authentication [gcs] ---
+gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
+
+# --- GCS download cache [download] ---
+local_data_dir:    ../data  # directory where downloaded files are cached
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ---
+# If set, odir is uploaded to {gcs_output_prefix}/logs after training.
+# Remove or set to null to skip.
+#gcs_output_prefix: gs://test_fno/runs/run01
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d              # tau-only scaling; unaffected by the eta stride below
+  alpha: 1.0
+
+# --- data preparation ---
+train_ratio: 0.8
+xyslice:  [null, -1]       # slice(None, -1) — drop last spatial bin (65 -> 64)
+# Raw neta=33 (power-of-2+1, see header note). Drop the last bin (same
+# off-by-one correction as x/y, 33 -> 32) and take every other step to land
+# on 16 eta increments (17 bins of 0.25 would also be power-of-2+1, but the
+# ask here is specifically 16 steps): slice(None, -1, 2) on 33 points keeps
+# indices 0,2,...,30 -> 16 points.
+etaslice: [null, -1, 2]
+tauslice: [null, 100]
+min_ntau_freezeout: 10     # drops the one bad 0-10% event (ntau_freezeout=2)
+
+# --- model ---
+hidden_channels: 16
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 100
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+
+# --- optimizer ---
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# CosineAnnealingWarmRestarts instead of the single-decay CosineAnnealingLR:
+# lr jumps back up to 8.0e-3 at the start of each cycle (epoch 0, 25, 50, 75
+# for T_mult=1) instead of decaying once to ~0 over the whole run. Motivated
+# by the single-decay run's eval metrics plateauing around epoch 30 while
+# train loss kept slowly falling -- this tests whether periodically
+# re-exploring a wider region around the current minimum finds a better one,
+# at the cost of repeatedly disturbing whatever it just converged to (the
+# "best" checkpoint logic saves on eval score regardless of cycle position,
+# so a mid-cycle disruption won't overwrite a better pre-restart checkpoint).
+scheduler:
+  name: cosine_warm_restarts
+  T_0: 25       # epochs in the first cycle
+  T_mult: 1     # every subsequent cycle is the same length (4 cycles in 100 epochs)
+
+# --- logging ---
+log_directly: true        # mirror output to training.log

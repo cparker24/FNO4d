@@ -159,7 +159,12 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
 
         # uproot.iterate chains multiple files transparently; step_size controls peak memory.
         # entry_stop in iterate is per-file, so we enforce the global cap by clipping each chunk.
-        chunk_size = nevents // 10 if nevents >= 10 else 1
+        # Capped at 5 rather than scaling with nevents: the per-chunk transient (raw chunk +
+        # awkward pad_none/fill_none/to_numpy intermediates) scales with chunk_size * per-event
+        # size, and per-event size grew substantially with the widened (neta=33) eta grid --
+        # nevents//10 (~19-20 events/chunk for a 199-event combined dataset) OOM-killed the
+        # process here even though the final target array alone fit comfortably in RAM.
+        chunk_size = min(nevents // 10, 5) if nevents >= 10 else 1
         out_idx = 0
         for chunk in up.iterate(tree_paths, filter_name="user_res",
                                 step_size=chunk_size, **open_kwargs):

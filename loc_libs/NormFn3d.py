@@ -58,6 +58,7 @@ class NormFn3d:
     def etau75_3d(data: np.ndarray,
                   tau_min: float,
                   dtau: float,
+                  in_place: bool = False,
                   ) -> np.ndarray:
         """ed → ed^0.75 * τ  (tau-only normalisation).
 
@@ -67,9 +68,20 @@ class NormFn3d:
 
         Parameters
         ----------
-        data    : (n_events, n_features, nx, ny, n_eta, n_tau)
-        tau_min : proper-time value at tau bin 0  [fm/c]
-        dtau    : proper-time step size            [fm/c]
+        data     : (n_events, n_features, nx, ny, n_eta, n_tau)
+        tau_min  : proper-time value at tau bin 0  [fm/c]
+        dtau     : proper-time step size            [fm/c]
+        in_place : mutate and return *data* itself instead of a copy. Default
+                   False preserves the non-destructive contract every caller
+                   expects; pass True only when the caller is about to discard
+                   its own reference to the pre-normalisation array anyway.
+                   Avoids a second full-size allocation right after a large
+                   training array was just built -- on this codebase's larger
+                   (widened-eta) grids that second allocation has been observed
+                   to cost a minute-plus of kernel time (not compute time; `sys`
+                   dominates `user` in `time -v`), consistent with transparent
+                   hugepage defrag stalling under memory pressure the process
+                   has no way to avoid other than not asking for the extra copy.
 
         Returns
         -------
@@ -77,7 +89,7 @@ class NormFn3d:
         """
         nT  = data.shape[-1]
         tau = (np.arange(nT) * dtau + tau_min).reshape(1, 1, 1, 1, nT)
-        out = data.copy()
+        out = data if in_place else data.copy()
         out[:, 0] = data[:, 0] ** 0.75 * tau
         return out
 

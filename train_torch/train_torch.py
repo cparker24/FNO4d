@@ -92,6 +92,8 @@ tauslice        = _slice(cfg.get('tauslice', [None, -1]))
 min_ntau_freezeout = cfg.get('min_ntau_freezeout', 10)
 lr              = cfg['lr']
 weight_decay    = cfg.get('weight_decay', 1e-4)
+scheduler_cfg   = cfg.get('scheduler', {'name': 'cosine_annealing'})
+scheduler_name  = scheduler_cfg.get('name', 'cosine_annealing')
 test_batch_sizes = cfg.get('test_batch_sizes', [10])
 eval_interval   = cfg.get('eval_interval', 2)
 save_last       = cfg.get('save_last', True)
@@ -161,6 +163,7 @@ log(f'log_directly:    {log_directly}')
 log(f'nevents(in):     {nevents_in}')
 log(f'AdamW: lr:         {lr}')
 log(f'AdamW: weight_decay: {weight_decay}')
+log(f'scheduler:         {scheduler_cfg}')
 log(f'test_batch_sizes:  {test_batch_sizes}')
 log(f'eval_interval:     {eval_interval}')
 log(f'model_dir:         {model_dir}')
@@ -217,12 +220,21 @@ if n_dropped > 0:
         f'data file, and training on them corrupts the loss (a near-zero-norm '
         f'target blows up the relative L2/H1 loss computation).')
 
-arr = arr_data['arr'][good_event_mask]
-arr = arr[:, :, xyslice, xyslice, etaslice, tauslice]
+# Fused into a single indexing call (mask + slices together) rather than
+# two sequential ones -- numpy applies a boolean index on one axis and
+# slices on the rest in one pass, so this never materialises a full-size
+# (masked-but-unsliced) intermediate copy the way arr[mask][:, :, ...] does.
+# That intermediate had briefly doubled peak RAM and OOM-killed the process
+# on the wider (neta=33) eta grid.
+_t = perf_counter()
+arr = arr_data['arr'][good_event_mask, :, xyslice, xyslice, etaslice, tauslice]
+log(f'[TIMING] fused mask+slice index: {perf_counter() - _t:.1f}s')
 
 grid_params = {k: arr_data[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
+_t = perf_counter()
 del arr_data
 gc.collect()
+log(f'[TIMING] del arr_data + gc.collect(): {perf_counter() - _t:.1f}s')
 
 log(f'nevents (constrained by input file(s)): {arr.shape[0]}')
 n_features = arr.shape[1]
@@ -247,11 +259,21 @@ log(f'shapes verify: {data_verify.shape}')
 normalizer = build_normalizer(norm_cfg, grid_params)
 log(f'normalizer:      {normalizer}')
 
-data_train  = normalizer.fit_transform(data_train)
-data_verify = normalizer.transform(data_verify)
+# in_place=True: data_train/data_verify's old references are discarded
+# immediately below, so normalizing in place (vs. allocating a full second
+# copy) is safe here -- see NormFn3d.etau75_3d's docstring for why that
+# second large allocation matters on this grid size.
+_t = perf_counter()
+data_train  = normalizer.fit_transform(data_train, in_place=True)
+log(f'[TIMING] normalizer.fit_transform(data_train): {perf_counter() - _t:.1f}s')
+_t = perf_counter()
+data_verify = normalizer.transform(data_verify, in_place=True)
+log(f'[TIMING] normalizer.transform(data_verify): {perf_counter() - _t:.1f}s')
 
+_t = perf_counter()
 normalizer_path = f'{model_dir}/normalizer.npz'
 normalizer.save(normalizer_path)
+log(f'[TIMING] normalizer.save(): {perf_counter() - _t:.1f}s')
 log(f'normalizer  →  {normalizer_path}')
 
 # ---------------------------------------------------------------------------
@@ -263,6 +285,7 @@ log(f'Using device: {device}')
 # ---------------------------------------------------------------------------
 # datasets and loaders
 # ---------------------------------------------------------------------------
+_t = perf_counter()
 dataset_train = FluidDataset(data_train)
 dataset_test  = FluidDataset(data_verify)
 
@@ -278,6 +301,7 @@ for res, test_bsize in zip(test_resolutions, test_batch_sizes):
                                    pin_memory=False,
                                    persistent_workers=False)
 gc.collect()
+log(f'[TIMING] dataset/dataloader construction: {perf_counter() - _t:.1f}s')
 
 # ---------------------------------------------------------------------------
 # model
@@ -297,7 +321,20 @@ log(f"Model memory usage: {memory_usage:.2f} MB")
 # optimizer, losses, trainer
 # ---------------------------------------------------------------------------
 optimizer = AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=30)
+if scheduler_name == 'cosine_annealing':
+    # Single smooth decay from lr down to eta_min (default 0) over the whole run.
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_epochs)
+elif scheduler_name == 'cosine_warm_restarts':
+    # Periodically jumps lr back up to its initial value every T_0 epochs
+    # (each subsequent cycle T_mult times as long as the last), instead of
+    # decaying once to ~0 -- lets the optimizer re-explore a wider region
+    # after settling into a minimum, at the cost of repeatedly disturbing
+    # whatever it just converged to.
+    T_0    = scheduler_cfg.get('T_0', 20)
+    T_mult = scheduler_cfg.get('T_mult', 1)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=T_0, T_mult=T_mult)
+else:
+    raise ValueError(f"Unknown scheduler.name {scheduler_name!r}; expected 'cosine_annealing' or 'cosine_warm_restarts'")
 
 l2loss = LpLoss(d=4, p=2)
 h1loss = H1Loss(d=4)

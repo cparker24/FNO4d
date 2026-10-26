@@ -149,12 +149,18 @@ class Normalizer:
             ref_peak = raw_ref.max(axis=0, keepdims=True)          # (1, ntau')
             self.ref = np.maximum(raw_ref / np.maximum(ref_peak, eps), eps)
 
-    def fit_transform(self, data: np.ndarray) -> np.ndarray:
-        """Normalise *training* data.  Computes and stores ref for data-driven norms."""
+    def fit_transform(self, data: np.ndarray, in_place: bool = False) -> np.ndarray:
+        """Normalise *training* data.  Computes and stores ref for data-driven norms.
+
+        in_place : passed through to NormFn3d.etau75_3d (the only family that
+                   currently supports it). Only safe when the caller is about
+                   to discard its own reference to *data* -- see that
+                   function's docstring for why this matters on large arrays.
+        """
         if self.name == 'none':
             return data
         if self.name == 'etau75_3d':
-            return NormFn3d.etau75_3d(data, self.tau_min, self.dtau)
+            return NormFn3d.etau75_3d(data, self.tau_min, self.dtau, in_place=in_place)
         if self.name == 'etau75_eta_3d':
             self.ref = NormFn3d.compute_ref_etau75_eta(data, self.tau_min, self.dtau)
             out, _   = NormFn3d.etau75_eta_3d(data, self.tau_min, self.dtau, ref=self.ref)
@@ -185,12 +191,15 @@ class Normalizer:
             return out.astype(data.dtype, copy=False)
         return out
 
-    def transform(self, data: np.ndarray) -> np.ndarray:
-        """Normalise *validation/test* data using the ref from fit_transform."""
+    def transform(self, data: np.ndarray, in_place: bool = False) -> np.ndarray:
+        """Normalise *validation/test* data using the ref from fit_transform.
+
+        in_place : see fit_transform's docstring.
+        """
         if self.name == 'none':
             return data
         if self.name == 'etau75_3d':
-            out = NormFn3d.etau75_3d(data, self.tau_min, self.dtau)
+            out = NormFn3d.etau75_3d(data, self.tau_min, self.dtau, in_place=in_place)
         elif self.name == 'etau75_eta_3d':
             self._require_ref()
             out, _ = NormFn3d.etau75_eta_3d(data, self.tau_min, self.dtau, ref=self.ref)

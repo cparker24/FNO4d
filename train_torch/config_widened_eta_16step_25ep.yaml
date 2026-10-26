@@ -1,0 +1,101 @@
+# ---------------------------------------------------------------------------
+# FNO training config — pure PyTorch
+#
+# Usage:
+#   python train_torch.py [--config config.yaml]
+#
+# One key selects the data source:
+#
+#   data_source: local | gcs_download | gcs_stream
+#
+# Keys marked [local]    are only read when data_source is local.
+# Keys marked [gcs]      are read for gcs_download and gcs_stream.
+# Keys marked [download] are only read when data_source is gcs_download.
+# ---------------------------------------------------------------------------
+
+# --- mode selection ---
+data_source: local        # local | gcs_download | gcs_stream
+
+# --- output ---
+# Isolates whether the warm-restart run's cycle-1 result (eval L2=1.061,
+# ~epoch 20-22) came from "resetting the LR explores a better optimum" or
+# just from a fast 25-epoch decay reaching a lower point by that epoch than
+# the 100-epoch decay's much-higher LR at the same epoch had reached. This
+# run is a dedicated single CosineAnnealingLR(T_max=25) cycle -- same data,
+# same model, same everything else as config_widened_eta_16step.yaml, only
+# n_epochs changed 100->25. If this run's final eval L2 also lands near
+# 1.06, the restarts added nothing; if it's noticeably worse, cycle 1's
+# result in the warm-restart run was closer to a fluke of that particular
+# run's trajectory.
+odir:      ./out_widened_eta_16step_25ep
+model_dir: ./checkpoints_widened_eta_16step_25ep
+
+# --- input data ---
+# [local] directory prepended to each entry in input_files
+input_dir: ../../rootfiles
+
+# Widened-eta, power-of-2+1 grid testbed (eta_min=-2.0, deta=0.125, neta=33
+# raw -- see js-contrib contribs/FnoHydro/PARTICLIZATION_INVESTIGATION.md).
+# 0-10% file has one bad event (ntau_freezeout=2; MUSIC hit its transverse
+# grid boundary and truncated) -- dropped automatically below by the
+# existing min_ntau_freezeout filter, not by editing the file.
+input_files:
+  - AuAu_50ev_0_10_eta2_n33.root
+  - AuAu_50ev_10_20_eta2_n33.root
+  - AuAu_50ev_20_30_eta2_n33.root
+  - AuAu_50ev_30_40_eta2_n33.root
+
+nevents_in: -1            # events to load (-1 = all)
+
+# --- GCS authentication [gcs] ---
+gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
+
+# --- GCS download cache [download] ---
+local_data_dir:    ../data  # directory where downloaded files are cached
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ---
+# If set, odir is uploaded to {gcs_output_prefix}/logs after training.
+# Remove or set to null to skip.
+#gcs_output_prefix: gs://test_fno/runs/run01
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d              # tau-only scaling; unaffected by the eta stride below
+  alpha: 1.0
+
+# --- data preparation ---
+train_ratio: 0.8
+xyslice:  [null, -1]       # slice(None, -1) — drop last spatial bin (65 -> 64)
+# Raw neta=33 (power-of-2+1, see header note). Drop the last bin (same
+# off-by-one correction as x/y, 33 -> 32) and take every other step to land
+# on 16 eta increments (17 bins of 0.25 would also be power-of-2+1, but the
+# ask here is specifically 16 steps): slice(None, -1, 2) on 33 points keeps
+# indices 0,2,...,30 -> 16 points.
+etaslice: [null, -1, 2]
+tauslice: [null, 100]
+min_ntau_freezeout: 10     # drops the one bad 0-10% event (ntau_freezeout=2)
+
+# --- model ---
+hidden_channels: 16
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 25               # matches the warm-restart run's T_0 (one cycle, isolated)
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+
+# --- optimizer ---
+# CosineAnnealingLR's T_max tracks n_epochs (=25 here), so this is a single
+# full decay from 8e-3 to ~0 over 25 epochs -- identical in shape to cycle 1
+# of the warm-restart run, just without the subsequent restarts.
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true        # mirror output to training.log

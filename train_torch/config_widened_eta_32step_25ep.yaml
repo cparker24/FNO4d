@@ -1,0 +1,118 @@
+# ---------------------------------------------------------------------------
+# FNO training config — pure PyTorch
+#
+# Usage:
+#   python train_torch.py [--config config.yaml]
+#
+# One key selects the data source:
+#
+#   data_source: local | gcs_download | gcs_stream
+#
+# Keys marked [local]    are only read when data_source is local.
+# Keys marked [gcs]      are read for gcs_download and gcs_stream.
+# Keys marked [download] are only read when data_source is gcs_download.
+# ---------------------------------------------------------------------------
+
+# --- mode selection ---
+data_source: local        # local | gcs_download | gcs_stream
+
+# --- output ---
+# Follow-up to config_widened_eta_16step_25ep.yaml (the chosen, non-overfit
+# 16-eta-step model that live-inference testing confirmed reduces the
+# central-rapidity peak -- see "Live-inference result" in
+# PARTICLIZATION_INVESTIGATION.md). This run trains at double the eta
+# resolution (32 steps instead of 16) using the SAME already-generated
+# power-of-2+1 raw data (neta=33) -- no new data generation needed, only
+# etaslice/n_modes/tauslice changed below. Same 25-epoch single-decay
+# schedule as the 16-step model.
+#
+# NOT a perfectly isolated eta-only comparison: doubling neta alone OOM'd
+# the 24GB RTX 3090 during actual backward+optimizer-step training (checked
+# empirically -- ntau=100 and even ntau=70 both failed once AdamW's
+# persistent optimizer state was accounted for; ntau=60 was the largest
+# value that survived 3 consecutive full training steps, ~20.4GB peak with
+# ~3GB headroom). tauslice cut 100->60 to fit, so this run changes two
+# variables (eta resolution AND tau window) at once. No checkpointing
+# support exists in this FNO implementation to avoid that trade-off (checked
+# fno_block.py/fno.py -- none), and reducing hidden_channels or eta modes
+# instead would have confounded the comparison differently. eta Fourier
+# modes kept at 16 (not doubled to 32) despite neta doubling -- doubling
+# modes too roughly doubled total params (151M -> 302M) and OOM'd even
+# harder; 16 modes on a 32-point axis also matches the modes=axis/2
+# convention already used for x/y, rather than the eta-specific
+# modes=full-axis convention the 16-step model used.
+odir:      ./out_widened_eta_32step_25ep
+model_dir: ./checkpoints_widened_eta_32step_25ep
+
+# --- input data ---
+# [local] directory prepended to each entry in input_files
+input_dir: ../../rootfiles
+
+# Widened-eta, power-of-2+1 grid testbed (eta_min=-2.0, deta=0.125, neta=33
+# raw -- see js-contrib contribs/FnoHydro/PARTICLIZATION_INVESTIGATION.md).
+# 0-10% file has one bad event (ntau_freezeout=2; MUSIC hit its transverse
+# grid boundary and truncated) -- dropped automatically below by the
+# existing min_ntau_freezeout filter, not by editing the file.
+input_files:
+  - AuAu_50ev_0_10_eta2_n33.root
+  - AuAu_50ev_10_20_eta2_n33.root
+  - AuAu_50ev_20_30_eta2_n33.root
+  - AuAu_50ev_30_40_eta2_n33.root
+
+nevents_in: -1            # events to load (-1 = all)
+
+# --- GCS authentication [gcs] ---
+gcs_key_file: ./fnotest-wayne-gcs.json   # service-account JSON key
+
+# --- GCS download cache [download] ---
+local_data_dir:    ../data  # directory where downloaded files are cached
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ---
+# If set, odir is uploaded to {gcs_output_prefix}/logs after training.
+# Remove or set to null to skip.
+#gcs_output_prefix: gs://test_fno/runs/run01
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d              # tau-only scaling; unaffected by the eta slice below
+  alpha: 1.0
+
+# --- data preparation ---
+train_ratio: 0.8
+xyslice:  [null, -1]       # slice(None, -1) — drop last spatial bin (65 -> 64)
+# Raw neta=33 (power-of-2+1). Drop ONLY the last bin (same off-by-one
+# correction as x/y, 33 -> 32) -- no stride this time, so all 32 remaining
+# bins are kept at the raw 0.125 spacing (vs. the 16-step model's stride-2
+# slice down to 0.25 effective spacing). Double the eta resolution the
+# model actually trains on, same eta_min=-2.0 coverage.
+etaslice: [null, -1]
+# Cut from the 16-step model's 100 to 60 -- required to fit the 24GB GPU
+# with neta doubled (see header note for the empirical memory check).
+tauslice: [null, 60]
+min_ntau_freezeout: 10     # drops the one bad 0-10% event (ntau_freezeout=2)
+
+# --- model ---
+hidden_channels: 16
+# eta Fourier modes kept at 16 (not doubled to match neta=32) -- see header
+# note; this also happens to match the modes=axis/2 convention x/y already use.
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 25               # same schedule as the chosen 16-step model
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+
+# --- optimizer ---
+# CosineAnnealingLR's T_max tracks n_epochs (=25 here), a single full decay
+# from 8e-3 to ~0 -- identical schedule to config_widened_eta_16step_25ep.yaml.
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true        # mirror output to training.log
