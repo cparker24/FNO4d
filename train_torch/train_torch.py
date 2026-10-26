@@ -410,6 +410,6 @@ if data_source in ('gcs_download', 'gcs_stream') and gcs_output_prefix:
         if _p.exists():
             _p.unlink()
             log(f'Removed {_fname} from {model_dir} before upload (redundant: resume state is in last_model.pt)')
-    #upload_gcs_dir(model_dir, f'{gcs_output_prefix}/checkpoints', gcs_key_file, show_progress=gcs_show_progress)
+    upload_gcs_dir(model_dir, f'{gcs_output_prefix}/checkpoints', gcs_key_file, show_progress=gcs_show_progress)
     upload_gcs_dir(odir, f'{gcs_output_prefix}/logs', gcs_key_file, show_progress=gcs_show_progress)
     log(f'GCS upload complete → {gcs_output_prefix}')

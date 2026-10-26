@@ -1,0 +1,102 @@
+# ---------------------------------------------------------------------------
+# FNO training config — pure PyTorch — Lambda Cloud (1x A100 40GB)
+#
+# Usage:
+#   python train_torch.py --config config_lambda_32step_tau120.yaml
+#
+# Run via setup_and_train_lambda.sh, which also installs the environment,
+# fetches the GCS key, and kicks this off.
+# ---------------------------------------------------------------------------
+
+# --- mode selection ---
+data_source: gcs_download   # downloads input_files to local_data_dir, then trains locally
+
+# --- output ---
+# Full eta resolution (32 steps) AND a tauslice long enough to reach genuine
+# freeze-out for the most central bin (0-10%, needs up to 111 tau steps at
+# the original Tfo=150 -- see "Memory estimate" in
+# js-contrib contribs/FnoHydro/PARTICLIZATION_INVESTIGATION.md) -- the
+# combination that OOM'd the 24GB RTX 3090 this was developed on
+# (config_widened_eta_32step_25ep.yaml had to cut tauslice to 60 to fit).
+# tauslice=120 is the 0-10% worst case (111) plus ~8% margin; estimated
+# ~34.1GB peak CUDA from the fitted memory-scaling model (fit to 3 real
+# runs, see the doc section above) -- comfortably inside 40GB with headroom
+# for the extrapolation uncertainty flagged there. Re-verify empirically
+# (watch nvidia-smi / the training log's peak CUDA line) before assuming
+# this is final; if it's tighter than expected, tauslice=111 (zero margin,
+# ~31.8GB estimated) is the fallback.
+odir:      ./out_lambda_32step_tau120
+model_dir: ./checkpoints_lambda_32step_tau120
+
+# --- input data ---
+# [gcs_download] full gs:// URIs; downloaded to local_data_dir before training.
+# Uploaded via remote_transfer/js_gcs.py -- see PARTICLIZATION_INVESTIGATION.md
+# or the session that generated these files for how to regenerate/re-upload.
+input_files:
+  - gs://test_fno/training_data/widened_eta_n33/AuAu_50ev_0_10_eta2_n33.root
+  - gs://test_fno/training_data/widened_eta_n33/AuAu_50ev_10_20_eta2_n33.root
+  - gs://test_fno/training_data/widened_eta_n33/AuAu_50ev_20_30_eta2_n33.root
+  - gs://test_fno/training_data/widened_eta_n33/AuAu_50ev_30_40_eta2_n33.root
+
+nevents_in: -1            # events to load (-1 = all)
+
+# --- GCS authentication [gcs] ---
+# setup_and_train_lambda.sh copies this in from wherever you staged it on the
+# instance (see that script's header) -- it is NOT committed to git.
+gcs_key_file: ./fnotest-wayne-gcs.json
+
+# --- GCS download cache [download] ---
+local_data_dir:    ../data  # downloaded ROOT files are cached here
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ---
+# Uploads model_dir -> {this}/checkpoints and odir -> {this}/logs once
+# training finishes (train_torch.py's existing, now-enabled upload step --
+# see its tail). Change the run name (last path component) per run so
+# repeated runs don't overwrite each other.
+gcs_output_prefix: gs://test_fno/runs/widened_eta_32step_tau120_lambda
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d              # tau-only scaling; unaffected by the eta slice below
+  alpha: 1.0
+
+# --- data preparation ---
+train_ratio: 0.8
+xyslice:  [null, -1]       # slice(None, -1) — drop last spatial bin (65 -> 64)
+# Raw neta=33 (power-of-2+1). Drop ONLY the last bin (same off-by-one
+# correction as x/y, 33 -> 32) -- no stride, so all 32 remaining bins are
+# kept at the raw 0.125 spacing. Same choice as config_widened_eta_32step_25ep.yaml.
+etaslice: [null, -1]
+# The whole point of this run: long enough to reach genuine freeze-out for
+# every centrality, not just 30-40%/10-20% (which needed per-centrality
+# elevated Tfo workarounds at tauslice=60 -- see PARTICLIZATION_INVESTIGATION.md).
+tauslice: [null, 120]
+min_ntau_freezeout: 10     # drops the one bad 0-10% event (ntau_freezeout=2)
+
+# --- model ---
+hidden_channels: 16
+# eta Fourier modes kept at 16 (not doubled to match neta=32) -- matches
+# config_widened_eta_32step_25ep.yaml's choice (doubling modes roughly
+# doubles params/memory; 16 modes on a 32-point axis also matches the
+# modes=axis/2 convention already used for x/y).
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 25               # same schedule as every other widened-eta model in this investigation
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+
+# --- optimizer ---
+# CosineAnnealingLR's T_max tracks n_epochs (=25), a single full decay from
+# 8e-3 to ~0 -- same schedule as every other widened-eta model.
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true        # mirror output to training.log
