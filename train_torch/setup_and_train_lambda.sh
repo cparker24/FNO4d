@@ -8,19 +8,20 @@
 # for a single A100 40GB -- see config_lambda_32step_tau120.yaml's header
 # for the memory estimate this targets).
 #
+# Clones from the GitHub mirror (github.com/cparker24/FNO4d, cparker/FNO-3D
+# branch) by default, not the original Codeberg repo -- the mirror already
+# has this commit (verified: `git ls-remote github cparker/FNO-3D` matches
+# local HEAD). Override FNO4D_REPO_URL below to clone from somewhere else.
+#
 # Before running this script:
 #
-#   1. Push this session's FNO4d commit so the clone below picks it up:
-#        (on your own machine, authenticated to Codeberg)
-#        cd /path/to/FNO4d && git push origin cparker/FNO-3D
-#
-#   2. Stage the GCS service-account key on the instance. It is NOT in git
+#   1. Stage the GCS service-account key on the instance. It is NOT in git
 #      and NOT fetched by this script -- copy it over yourself, e.g. from
 #      your own machine:
 #        scp /home/cparker/jetscape-docker/FNO4d/train_gcs/fnotest-wayne-gcs.json \
 #            ubuntu@<lambda-instance-ip>:~/fnotest-wayne-gcs.json
 #
-#   3. On the instance:
+#   2. On the instance:
 #        bash setup_and_train_lambda.sh
 #      Training is long (rough estimate: tens of minutes to a few hours for
 #      25 epochs at tauslice=120 on one A100 -- re-check the actual
@@ -32,7 +33,8 @@
 #        # Ctrl-b d to detach; tmux attach -t fno_train to check back in.
 #
 # What it does:
-#   - Clones FNO4d (cparker/FNO-3D branch) to ~/FNO4d (skips if already there)
+#   - Clones FNO4d (github.com/cparker24/FNO4d, cparker/FNO-3D branch) to
+#     ~/FNO4d (skips if already there)
 #   - Runs install.sh --gcs (creates venv/, installs base + GCS deps, the
 #     vendored neuraloperator fork, and detects/installs a CUDA-matching
 #     torch build if one isn't already importable)
@@ -53,7 +55,7 @@ set -euo pipefail
 log()  { echo "[setup_and_train_lambda] $*"; }
 die()  { echo "[setup_and_train_lambda] ERROR: $*" >&2; exit 1; }
 
-FNO4D_REPO_URL="${FNO4D_REPO_URL:-https://codeberg.org/jhputschke/FNO4d.git}"
+FNO4D_REPO_URL="${FNO4D_REPO_URL:-https://github.com/cparker24/FNO4d.git}"
 FNO4D_BRANCH="${FNO4D_BRANCH:-cparker/FNO-3D}"
 FNO4D_DIR="${FNO4D_DIR:-$HOME/FNO4d}"
 GCS_KEY_SRC="${GCS_KEY_SRC:-$HOME/fnotest-wayne-gcs.json}"
