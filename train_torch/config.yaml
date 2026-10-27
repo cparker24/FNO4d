@@ -27,13 +27,10 @@ input_dir: ../../rootfiles
 # For local:        bare filenames  (e.g. dAu_25ev_mb.root)
 # For gcs_*:        full gs:// URIs (e.g. gs://my-bucket/data/file.root)
 input_files:
-  - AuAu_100ev_0_10-1.root
+  - AuAu_50ev_0_10-1.root
   - AuAu_50ev_10_20-1.root
-  - AuAu_50ev_10_20-2.root
   - AuAu_50ev_20_30-1.root
-  - AuAu_50ev_20_30-2.root
   - AuAu_50ev_30_40-1.root
-  - AuAu_50ev_30_40-2.root
   #- gs://test_fno/dAu_25ev_mb.root
 
 nevents_in: -1            # events to load (-1 = all)
@@ -61,7 +58,7 @@ normalization:
 train_ratio: 0.8
 xyslice:  [null, -1]      # slice(None, -1) — drop last spatial bin
 etaslice: [null, -1]      # slice(None, -1) — drop last eta bin
-tauslice: [null, 70]    # slice(None, None) — full tau range
+tauslice: [null, 100]   # slice(None, None) — full tau range
 
 # --- model ---
 hidden_channels: 16
@@ -74,7 +71,11 @@ checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
 min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
 save_last: true           # save final epoch state to model_dir/last_model.*
 eval_interval: 2          # run evaluation every N epochs
-test_batch_sizes: [5]     # eval batch size per test resolution
+# 2, not 5: tauslice=100 (vs run B/C/D's 70) raises per-sample eval memory
+# enough to OOM at batch_size 5 (22.94/23.68 GiB used). Eval batch size
+# doesn't affect the model or the metric, just how many samples are
+# batched together to compute it.
+test_batch_sizes: [2]     # eval batch size per test resolution
 
 # --- optimizer ---
 lr: 8.0e-3
