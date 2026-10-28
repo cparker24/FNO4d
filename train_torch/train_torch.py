@@ -58,6 +58,7 @@ from training_utils import (RunLog, patch_trainer_logging, patch_trainer_checkpo
 from parse_training_log import TrainingHistory
 from norm_utils import build_normalizer
 from fluid_datasets import FluidDataset
+from masked_loss import TailMaskedLoss
 
 # ---------------------------------------------------------------------------
 # GCS-specific imports
@@ -336,8 +337,8 @@ elif scheduler_name == 'cosine_warm_restarts':
 else:
     raise ValueError(f"Unknown scheduler.name {scheduler_name!r}; expected 'cosine_annealing' or 'cosine_warm_restarts'")
 
-l2loss = LpLoss(d=4, p=2)
-h1loss = H1Loss(d=4)
+l2loss = TailMaskedLoss(LpLoss(d=4, p=2))
+h1loss = TailMaskedLoss(H1Loss(d=4))
 train_loss  = h1loss
 eval_losses = {'h1': h1loss, 'l2': l2loss}
 
