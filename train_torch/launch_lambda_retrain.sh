@@ -8,7 +8,7 @@
 # manually ssh in first.
 #
 # Usage:
-#   ./launch_lambda_retrain.sh <instance-ip> [train-config] [ssh-user] [gcs-key-path]
+#   ./launch_lambda_retrain.sh <instance-ip> [train-config] [ssh-user] [gcs-key-path] [ssh-key]
 #
 #   instance-ip   required. The Lambda instance's public IP.
 #   train-config  optional. Defaults to config_lambda_32step_tau120_maskedloss.yaml
@@ -18,6 +18,8 @@
 #   ssh-user      optional. Defaults to ubuntu (Lambda's default image user).
 #   gcs-key-path  optional. Defaults to train_gcs/fnotest-wayne-gcs.json next
 #                 to this script.
+#   ssh-key       optional. Private key for the instance's SSH keypair.
+#                 Defaults to ~/.ssh/id_ed25519.
 #
 # Example:
 #   ./launch_lambda_retrain.sh 123.45.67.89
@@ -34,8 +36,8 @@
 #
 # After this returns, training is running on the instance whether or not you
 # stay connected. Check on it with:
-#   ssh <ssh-user>@<instance-ip> tmux attach -t fno_train      # live view
-#   ssh <ssh-user>@<instance-ip> tail -f lambda_train.log      # just the log
+#   ssh -i ~/.ssh/id_ed25519 <ssh-user>@<instance-ip> tmux attach -t fno_train
+#   ssh -i ~/.ssh/id_ed25519 <ssh-user>@<instance-ip> tail -f lambda_train.log
 
 set -euo pipefail
 
@@ -48,24 +50,27 @@ INSTANCE_IP="${1:-}"
 TRAIN_CONFIG="${2:-config_lambda_32step_tau120_maskedloss.yaml}"
 SSH_USER="${3:-ubuntu}"
 GCS_KEY_PATH="${4:-$SCRIPT_DIR/../train_gcs/fnotest-wayne-gcs.json}"
+SSH_KEY="${5:-$HOME/.ssh/id_ed25519}"
 
 RAW_SETUP_SCRIPT_URL="https://raw.githubusercontent.com/cparker24/FNO4d/cparker/FNO-3D/train_torch/setup_and_train_lambda.sh"
 
-[ -n "$INSTANCE_IP" ] || die "usage: $0 <instance-ip> [train-config] [ssh-user] [gcs-key-path]"
+[ -n "$INSTANCE_IP" ] || die "usage: $0 <instance-ip> [train-config] [ssh-user] [gcs-key-path] [ssh-key]"
 [ -f "$GCS_KEY_PATH" ] || die "GCS key not found at $GCS_KEY_PATH -- pass its path as the 4th argument."
+[ -f "$SSH_KEY" ] || die "SSH key not found at $SSH_KEY -- pass its path as the 5th argument."
 
 SSH_TARGET="${SSH_USER}@${INSTANCE_IP}"
+SSH_OPTS=(-i "$SSH_KEY" -o StrictHostKeyChecking=accept-new)
 
-log "Waiting for SSH on $SSH_TARGET ..."
+log "Waiting for SSH on $SSH_TARGET (key: $SSH_KEY) ..."
 for _ in $(seq 1 30); do
-    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "$SSH_TARGET" true 2>/dev/null && break
+    ssh "${SSH_OPTS[@]}" -o ConnectTimeout=5 "$SSH_TARGET" true 2>/dev/null && break
     sleep 5
 done
-ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "$SSH_TARGET" true \
-    || die "could not SSH to $SSH_TARGET after 150s -- check the instance is up and your SSH key is registered with it."
+ssh "${SSH_OPTS[@]}" -o ConnectTimeout=5 "$SSH_TARGET" true \
+    || die "could not SSH to $SSH_TARGET after 150s -- check the instance is up and that $SSH_KEY is the keypair it was launched with."
 
 log "Staging GCS key ($GCS_KEY_PATH) -> ${SSH_TARGET}:~/fnotest-wayne-gcs.json ..."
-scp -o StrictHostKeyChecking=accept-new "$GCS_KEY_PATH" "${SSH_TARGET}:~/fnotest-wayne-gcs.json"
+scp "${SSH_OPTS[@]}" "$GCS_KEY_PATH" "${SSH_TARGET}:~/fnotest-wayne-gcs.json"
 
 log "Fetching setup_and_train_lambda.sh and starting training in a detached tmux session (fno_train) ..."
 log "  train config: $TRAIN_CONFIG"
@@ -82,9 +87,9 @@ tmux new-session -d -s fno_train \
 echo "Started. tmux session: fno_train"
 EOF
 )
-ssh "$SSH_TARGET" "$REMOTE_CMD"
+ssh "${SSH_OPTS[@]}" "$SSH_TARGET" "$REMOTE_CMD"
 
 log "Done. Training is running in the background on $INSTANCE_IP."
 log "Check on it with:"
-log "  ssh $SSH_TARGET tmux attach -t fno_train      # live view (Ctrl-b d to detach)"
-log "  ssh $SSH_TARGET tail -f lambda_train.log       # just the log"
+log "  ssh -i $SSH_KEY $SSH_TARGET tmux attach -t fno_train      # live view (Ctrl-b d to detach)"
+log "  ssh -i $SSH_KEY $SSH_TARGET tail -f lambda_train.log       # just the log"
