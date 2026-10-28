@@ -4,7 +4,13 @@
 # or via requirements-mac.txt / requirements-linux.txt.
 
 # Data I/O — ROOT files and HDF5
-numpy>=1.25
+# <2: Lambda Stack images ship a pre-built PyTorch compiled against NumPy
+# 1.x; letting pip install NumPy 2.x fresh here causes a NumPy ABI mismatch
+# at import time ("A module that was compiled using NumPy 1.x cannot be run
+# in NumPy 2.x..."). Hit this during the first tauslice=120 Lambda run; fixed
+# manually with `pip install "numpy<2"` there, pinned here now so a fresh
+# `install.sh --gcs` doesn't hit it again.
+numpy>=1.25,<2
 uproot
 awkward
 h5py
