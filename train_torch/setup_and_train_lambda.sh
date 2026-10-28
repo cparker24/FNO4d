@@ -101,5 +101,8 @@ log "(input ROOT files download from GCS on first run, then train; checkpoint" \
     "+ logs upload back to GCS automatically when training finishes)"
 python3 -u train_torch.py --config "$TRAIN_CONFIG"
 
-log "Done. Check the config's gcs_output_prefix in GCS for the uploaded checkpoint + logs:"
+echo "=================================================="
+echo "   TRAINING COMPLETE -- $TRAIN_CONFIG"
+echo "=================================================="
+log "Checkpoint + logs uploaded to GCS:"
 grep "gcs_output_prefix" "$TRAIN_CONFIG"
