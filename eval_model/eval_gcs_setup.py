@@ -323,11 +323,22 @@ def load_data(eval_cfg: dict, gcs_fs, gcs_key: Optional[str],
     else:
         arr = raw['arr']
     n_train = int(arr.shape[0] * train_ratio)
+    # .copy(): chained basic-slice indexing (xyslice/etaslice/tauslice are all
+    # plain slice objects) returns a VIEW onto arr's buffer, not a new array --
+    # without copying, data_test.base keeps arr's full (pre-slice, all-events)
+    # buffer alive even after `del arr`, so the gc.collect() below frees
+    # nothing. Harmless for small (2D+1) grids this tooling was first built
+    # for, but for a 3D+1 widened-eta grid the raw pre-slice buffer can be
+    # tens of GB larger than the sliced one actually needed (every event in
+    # the file, full nx*ny*neta before xyslice/etaslice drop the last bin,
+    # full tauslice-length tau axis) -- held onto for the rest of the
+    # process's life, on top of model_out_phys/y_true_phys later. Hit this as
+    # an OOM kill (exit 137) evaluating the masked-loss tau120 model.
     if use_split:
-        data_test = arr[n_train:][:, :, xyslice, xyslice, etaslice, tauslice]
+        data_test = arr[n_train:][:, :, xyslice, xyslice, etaslice, tauslice].copy()
         print(f'Test split: {data_test.shape[0]} events  shape={data_test.shape}')
     else:
-        data_test = arr[:, :, xyslice, xyslice, etaslice, tauslice]
+        data_test = arr[:, :, xyslice, xyslice, etaslice, tauslice].copy()
         print(f'All events: {data_test.shape[0]}  shape={data_test.shape}')
     del arr; gc.collect()
     return data_test, grid
