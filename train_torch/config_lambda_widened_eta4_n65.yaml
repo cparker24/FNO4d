@@ -1,0 +1,133 @@
+# ---------------------------------------------------------------------------
+# FNO training config — pure PyTorch — Lambda Cloud (1x A100/H100 80GB)
+#
+# Full-scale retrain over the DOUBLED eta range AND cell count
+# (eta_min=-4.0, deta=0.125 unchanged -> neta=65 raw / 64 after the usual
+# etaslice[:-1] correction, vs. the production eta2_n33 dataset's
+# eta_min=-2.0/neta=33 raw/32), at the production model's full capacity
+# (hidden_channels=16, same n_modes, same tauslice=120, same 25-epoch/
+# TailMaskedLoss recipe as config_lambda_32step_tau120_maskedloss.yaml).
+#
+# This follows up the single-centrality (30-40%), reduced-capacity
+# (hidden_channels=8, tauslice=65) pilot documented in
+# PARTICLIZATION_INVESTIGATION.md's "Pilot: doubling the trained eta range
+# AND cell count" entry, which showed widening the domain mechanically
+# reaches real forward-rapidity yield a narrower model cannot (closing the
+# outright-truncation part of the FNO/MUSIC forward-rapidity gap) but was
+# NOT trustworthy in shape (asymmetric peak, yield rising at domain edges)
+# -- attributed there to the pilot's severely limited training set (4
+# events) and halved model capacity. This config removes both limitations:
+# full 50-event x 4-centrality dataset (see "Full-scale widened-eta
+# training data generation complete, verified" in the same doc) and full
+# hidden_channels=16 capacity.
+#
+# VRAM estimate (PARTICLIZATION_INVESTIGATION.md's memory-scaling formula,
+# peak_CUDA_GB ~= 0.00797*(neta*tauslice) + 3.47, validated at
+# hidden_channels=16): neta=64, tauslice=120 -> ~64.7GB. This DOES NOT fit
+# the 40GB A100 the original eta2_n33 retrain used -- needs an 80GB card
+# (A100 80GB or H100 80GB) for a safe margin. Do not launch this on a 40GB
+# instance.
+#
+# n_modes deliberately UNCHANGED from the eta2_n33/pilot configs (eta axis
+# modes stay at 16, not doubled to 32 to match the modes=axis/2 convention
+# used for x/y) -- same choice the pilot already made, kept here so this is
+# a controlled "same architecture, full data + full capacity" step up from
+# the validated pilot, not a second untested architecture change at the
+# same time as the scale-up.
+#
+# tauslice=120 unchanged from the eta2_n33 retrain: the new dataset's own
+# verified ntau_freezeout maxes out at 117 (0-10%), 104 (10-20%), 90
+# (20-30%), 80 (30-40%) -- tauslice=120 (tau up to ~12.44 fm/c) comfortably
+# covers all of them, same margin the original retrain had.
+#
+# min_ntau_freezeout=10 (unchanged) also drops this dataset's two known
+# near-empty events (ntau_freezeout=2 each, one in 0-10% idx 39, one in
+# 10-20% idx 34 -- a benign transverse-grid-boundary MUSIC truncation
+# unrelated to the eta widening itself, see the data-generation writeup),
+# the same mechanism that already dropped the analogous bad event in the
+# eta2_n33 dataset.
+#
+# Usage:
+#   python train_torch.py --config config_lambda_widened_eta4_n65.yaml
+#
+# Run via setup_and_train_lambda.sh (same script, no changes needed --
+# TRAIN_CONFIG is already parameterized):
+#   TRAIN_CONFIG=config_lambda_widened_eta4_n65.yaml bash setup_and_train_lambda.sh
+# ---------------------------------------------------------------------------
+
+# --- mode selection ---
+data_source: gcs_download   # downloads input_files to local_data_dir, then trains locally
+
+# --- output ---
+odir:      ./out_lambda_widened_eta4_n65
+model_dir: ./checkpoints_lambda_widened_eta4_n65
+
+# --- input data ---
+# [gcs_download] full gs:// URIs; downloaded to local_data_dir before training.
+# Uploaded directly from the data-generation host (gcs_utils.upload_gcs_file)
+# -- see PARTICLIZATION_INVESTIGATION.md's full-scale widened-eta data
+# generation entry for how these were produced and verified.
+input_files:
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_0_10_eta4_n65.root
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_10_20_eta4_n65.root
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_20_30_eta4_n65.root
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_30_40_eta4_n65.root
+
+nevents_in: -1            # events to load (-1 = all)
+
+# --- GCS authentication [gcs] ---
+# setup_and_train_lambda.sh copies this in from wherever you staged it on the
+# instance (see that script's header) -- it is NOT committed to git.
+gcs_key_file: ./fnotest-wayne-gcs.json
+
+# --- GCS download cache [download] ---
+local_data_dir:    ../data  # downloaded ROOT files are cached here
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ---
+# Uploads model_dir -> {this}/checkpoints and odir -> {this}/logs once
+# training finishes. Separate run name from every eta2_n33 run so none of
+# those checkpoints/logs are overwritten.
+gcs_output_prefix: gs://test_fno/runs/widened_eta4_n65_32step_tau120_lambda_maskedloss
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d              # tau-only scaling; unaffected by the eta slice below
+  alpha: 1.0
+
+# --- data preparation ---
+train_ratio: 0.8
+xyslice:  [null, -1]       # slice(None, -1) — drop last spatial bin (65 -> 64)
+# Raw neta=65 (power-of-2+1, DOUBLED from the eta2_n33 dataset's 33). Drop
+# ONLY the last bin (same off-by-one correction as x/y, 65 -> 64) -- no
+# stride, so all 64 remaining bins are kept at the raw 0.125 spacing.
+etaslice: [null, -1]
+# Unchanged from the eta2_n33 retrain -- see header: comfortably covers
+# this dataset's own verified max ntau_freezeout (117).
+tauslice: [null, 120]
+min_ntau_freezeout: 10     # drops the two bad events (0-10% idx39, 10-20% idx34); see header
+
+# --- model ---
+hidden_channels: 16
+# eta Fourier modes deliberately kept at 16 (not doubled to 32) -- see
+# header. Matches the pilot's own choice for this exact grid doubling.
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 25               # same schedule as every other widened-eta model in this investigation
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+
+# --- optimizer ---
+# CosineAnnealingLR's T_max tracks n_epochs (=25), a single full decay from
+# 8e-3 to ~0 -- same schedule as every other widened-eta model.
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true        # mirror output to training.log
