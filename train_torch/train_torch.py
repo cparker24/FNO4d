@@ -187,8 +187,24 @@ if not input_files:
 choose_ntau = tauslice.stop if isinstance(tauslice.stop, int) and tauslice.stop > 0 else None
 log(f'choose_ntau (pre-slice padding target): {choose_ntau}')
 
+# xyslice/etaslice/tauslice and min_ntau_freezeout are now passed straight
+# into read_3d_data, which crops and filters DURING the chunked ROOT read
+# (per-chunk, a few events at a time) instead of after returning the full,
+# all-events, raw-resolution array. Previously the crop/filter happened here,
+# as a fused mask+slice index on the full returned array -- correct, but
+# that index still has to hold both the full array AND its sliced output in
+# memory at once (numpy indexing can't do this in place). On the doubled
+# (eta4/n65) grid that peak (~123GiB + ~116GiB =~ 239GiB) exceeded the
+# instance's RAM and OOM-killed the process; see
+# js-contrib contribs/FnoHydro/PARTICLIZATION_INVESTIGATION.md's "widened
+# eta4/n65 retrain: host-RAM OOM during data loading" entry. Doing it inside
+# read_3d_data means the full raw-resolution array is never materialised at
+# all -- only the already-cropped/filtered one, at roughly its final size.
+_read_kwargs = dict(xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
+                     min_ntau_freezeout=min_ntau_freezeout)
+
 if data_source == 'local':
-    arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None)
+    arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, **_read_kwargs)
 
 elif data_source == 'gcs_download':
     log(f'Downloading {len(input_files)} file(s) from GCS ...')
@@ -200,39 +216,22 @@ elif data_source == 'gcs_download':
     log(f'Download complete in {perf_counter() - t_dl:.1f}s')
     for gs_uri, local_path in zip(input_files, local_files):
         log(f'  {gs_uri}  →  {local_path}')
-    arr_data = read_3d_data(local_files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None)
+    arr_data = read_3d_data(local_files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, **_read_kwargs)
 
 else:  # gcs_stream
     storage_options = get_gcs_storage_options(gcs_key_file)
-    arr_data = read_3d_data(input_files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, storage_options=storage_options)
+    arr_data = read_3d_data(input_files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, storage_options=storage_options, **_read_kwargs)
 
 log('Data parameters from input file:')
 for key in arr_data.keys():
     if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
         log(f'  {key}: {arr_data[key]}')
 
-ntau_freezeout = arr_data['ntau_freezeout']
-good_event_mask = ntau_freezeout >= min_ntau_freezeout
-n_dropped = int((~good_event_mask).sum())
-if n_dropped > 0:
-    log(f'Dropping {n_dropped}/{len(ntau_freezeout)} event(s) with '
-        f'ntau_freezeout < {min_ntau_freezeout} -- these are blank or near-blank '
-        f'records left behind when MUSIC crashed partway through generating the '
-        f'data file, and training on them corrupts the loss (a near-zero-norm '
-        f'target blows up the relative L2/H1 loss computation).')
-
-# Fused into a single indexing call (mask + slices together) rather than
-# two sequential ones -- numpy applies a boolean index on one axis and
-# slices on the rest in one pass, so this never materialises a full-size
-# (masked-but-unsliced) intermediate copy the way arr[mask][:, :, ...] does.
-# That intermediate had briefly doubled peak RAM and OOM-killed the process
-# on the wider (neta=33) eta grid.
+# arr_data['arr'] is already cropped (xyslice/etaslice/tauslice) and filtered
+# (min_ntau_freezeout) by read_3d_data -- no further indexing needed here.
 _t = perf_counter()
-arr = arr_data['arr'][good_event_mask, :, xyslice, xyslice, etaslice, tauslice]
-log(f'[TIMING] fused mask+slice index: {perf_counter() - _t:.1f}s')
-
+arr = arr_data['arr']
 grid_params = {k: arr_data[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
-_t = perf_counter()
 del arr_data
 gc.collect()
 log(f'[TIMING] del arr_data + gc.collect(): {perf_counter() - _t:.1f}s')

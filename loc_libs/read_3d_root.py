@@ -5,13 +5,29 @@ import awkward as ak
 import numpy as np
 
 def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
-                 storage_options=None, verbose=False):
+                 storage_options=None, verbose=False,
+                 xyslice=None, etaslice=None, tauslice=None,
+                 min_ntau_freezeout=None):
     ''' read events from a 3d root file; file_path may be a single path or a list of paths
     returns:
       {'data' : 6D numpy array,
        'tau0' : 1D numpy array of initial tau values,
         # several parameters
         x_min, y_min, eta_min, dx, dy, deta, dtau : grid parameters}
+
+    xyslice, etaslice, tauslice : optional slice objects, applied to the nx/ny,
+        neta, and (post-padding) tau axes respectively while the data is still
+        being read in per-chunk pieces, so the full raw-resolution array is
+        never materialised. None (the default) keeps that axis uncropped --
+        unchanged behavior for any existing caller that doesn't pass these.
+    min_ntau_freezeout : optional int. If given, events with ntau_freezeout
+        below this are dropped (same per-event filter train_torch.py used to
+        apply *after* this function returned the full array -- doing it here
+        instead, before allocating the output array, is what avoids ever
+        holding both the full and the cropped/filtered array in memory at
+        once; see the "variable-length tau dimension" branch below for the
+        full explanation). None (the default) keeps every event, unchanged
+        behavior for any existing caller that doesn't pass this.
     '''
 
     if verbose:
@@ -148,9 +164,57 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
         target_len = int(dat['nx']*dat['ny']*dat['neta']*dat['nFeatures']*choose_ntau)
         print(f"Processing {nevents} events with variable-length tau dimension; padding to {choose_ntau} taus per event (total size per event: {target_len} entries)")
 
-        # Allocate the full output array once, up front
+        # Resolve the crop slices against the RAW grid dims up front, so the
+        # output array below can be allocated at its final CROPPED size
+        # instead of the full raw resolution. int()'d defensively since
+        # slice.indices() requires true ints and dat['nx']/etc. come from
+        # uproot's TParameter<float>.member('fVal').
+        nx_raw, ny_raw, neta_raw = int(dat['nx']), int(dat['ny']), int(dat['neta'])
+        xyslice_r  = xyslice  if xyslice  is not None else slice(None)
+        etaslice_r = etaslice if etaslice is not None else slice(None)
+        tauslice_r = tauslice if tauslice is not None else slice(None)
+        nx_out   = len(range(*xyslice_r.indices(nx_raw)))
+        ny_out   = len(range(*xyslice_r.indices(ny_raw)))
+        neta_out = len(range(*etaslice_r.indices(neta_raw)))
+        ntau_out = len(range(*tauslice_r.indices(choose_ntau)))
+
+        # Event-level filtering (dropping blank/near-blank records left by a
+        # MUSIC crash partway through generation) is also done here, before
+        # allocation, for the same reason -- this used to be applied by the
+        # caller (train_torch.py) *after* this function returned the full,
+        # all-events array, which needed a second, almost-as-large copy held
+        # in memory at the same time as the first (both briefly resident).
+        # That "fused mask+slice" step is exactly what OOM-killed the retrain
+        # on the doubled (eta4/n65) grid: ~123GiB original + ~116GiB sliced
+        # copy =~ 239GiB peak, more than the instance's RAM, even though the
+        # final (cropped) array alone would have fit comfortably. Filtering
+        # and cropping HERE, per-chunk, as each small piece is read, means
+        # the only thing ever held at full dataset size is the final,
+        # already-cropped array -- the raw-resolution/all-events array is
+        # never materialised at all.
+        windowed_ntau_freezeout = dat['ntau_freezeout'][:nevents]
+        if min_ntau_freezeout is not None:
+            good_mask = windowed_ntau_freezeout >= min_ntau_freezeout
+        else:
+            good_mask = np.ones(nevents, dtype=bool)
+        n_dropped = int((~good_mask).sum())
+        if n_dropped > 0:
+            print(f'Dropping {n_dropped}/{nevents} event(s) with '
+                  f'ntau_freezeout < {min_ntau_freezeout} -- these are blank or '
+                  f'near-blank records left behind when MUSIC crashed partway '
+                  f'through generating the data file, and training on them '
+                  f'corrupts the loss (a near-zero-norm target blows up the '
+                  f'relative L2/H1 loss computation).')
+        nevents_out = int(good_mask.sum())
+
+        print(f"Cropping during load: nx {nx_raw}->{nx_out}, ny {ny_raw}->{ny_out}, "
+              f"neta {neta_raw}->{neta_out}, ntau {choose_ntau}->{ntau_out}, "
+              f"nevents {nevents}->{nevents_out} (output array allocated at the cropped size)")
+
+        # Allocate the output array ONCE, up front -- already at its final
+        # CROPPED/FILTERED shape (see above), not the full raw resolution.
         arr = np.zeros(
-            (nevents, choose_ntau, dat['nx'], dat['ny'], dat['neta'], dat['nFeatures']), dtype=np.float32
+            (nevents_out, ntau_out, nx_out, ny_out, neta_out, dat['nFeatures']), dtype=np.float32
         )
 
         if verbose:
@@ -165,15 +229,16 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
         # nevents//10 (~19-20 events/chunk for a 199-event combined dataset) OOM-killed the
         # process here even though the final target array alone fit comfortably in RAM.
         chunk_size = min(nevents // 10, 5) if nevents >= 10 else 1
-        out_idx = 0
+        out_idx_raw = 0   # index into the nevents-windowed (pre-filter) event sequence
+        out_idx = 0       # index into the cropped/filtered output array
         for chunk in up.iterate(tree_paths, filter_name="user_res",
                                 step_size=chunk_size, **open_kwargs):
-            remaining = nevents - out_idx
+            remaining = nevents - out_idx_raw
             if remaining <= 0:
                 break
             arr_ak = chunk['user_res'][:remaining]  # clip last partial chunk to exact count
             n_chunk = len(arr_ak)
-            print(f"Processing events {out_idx} to {out_idx + n_chunk}...")
+            print(f"Processing events {out_idx_raw} to {out_idx_raw + n_chunk}...")
 
             if verbose:
                 current, peak = tracemalloc.get_traced_memory()
@@ -183,16 +248,29 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
                 ak.fill_none(ak.pad_none(arr_ak, target_len, axis=-1, clip=True),
                             np.float32(0.))
             ).astype(np.float32, copy=False)
+            padded = padded.reshape(
+                n_chunk, choose_ntau, dat['nx'], dat['ny'], dat['neta'], dat['nFeatures']
+            )
 
             if verbose:
                 current, peak = tracemalloc.get_traced_memory()
                 print(f"[Memory tracemalloc] Current: {current / 1024**3:.2f} GiB; Peak: {peak / 1024**3:.2f} GiB")
 
-            arr[out_idx:out_idx + n_chunk] = padded.reshape(
-                n_chunk, choose_ntau, dat['nx'], dat['ny'], dat['neta'], dat['nFeatures']
-            )
-            out_idx += n_chunk
-            if out_idx >= nevents:
+            # Crop + filter THIS CHUNK ONLY (a few events' worth, per
+            # chunk_size above) rather than the whole dataset at once -- the
+            # transient here is chunk_size events wide, not nevents wide.
+            # Fused into one indexing call (boolean mask on axis 0 + slices
+            # on the rest) so this itself doesn't briefly double even the
+            # small per-chunk array.
+            chunk_mask = good_mask[out_idx_raw:out_idx_raw + n_chunk]
+            n_good_chunk = int(chunk_mask.sum())
+            if n_good_chunk > 0:
+                cropped = padded[chunk_mask, tauslice_r, xyslice_r, xyslice_r, etaslice_r, :]
+                arr[out_idx:out_idx + n_good_chunk] = cropped
+                out_idx += n_good_chunk
+            out_idx_raw += n_chunk
+
+            if out_idx_raw >= nevents:
                 del arr_ak, padded
                 break
 
@@ -202,7 +280,7 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
 
             del arr_ak, padded   # intermediate freed immediately
 
-        print('Before moveaxis - Read array of shape:', arr.shape)
+        print('Before moveaxis - Read array of shape (already cropped/filtered):', arr.shape)
 
         arr = np.moveaxis(arr, 1, -1)
         arr = np.moveaxis(arr, -2, 1)
