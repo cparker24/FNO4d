@@ -1,0 +1,73 @@
+# ---------------------------------------------------------------------------
+# FNO training config -- PILOT, doubled eta range/cell count, 30-40% only
+#
+# Tests whether doubling the trained eta window (eta_min -2.0 -> -4.0,
+# neta 32 -> 64, same deta=0.125 spacing -- both RANGE and CELL COUNT double,
+# not resolution, which was already tried once in
+# config_widened_eta_32step_25ep.yaml) improves the forward/backward hadron
+# rapidity gap documented in
+# js-contrib contribs/FnoHydro/PARTICLIZATION_INVESTIGATION.md. Single
+# centrality (30-40%, cheapest/fastest, and the deficit's shape was already
+# shown centrality-independent), single 5-event pilot ROOT file (generated
+# via xmls/AuAu_pilot5_30_40_eta4_n65.xml), local GPU (not Lambda Cloud) --
+# tauslice chosen from the already-validated memory-scaling fit in
+# PARTICLIZATION_INVESTIGATION.md's "Memory estimate" section
+# (peak_CUDA_GB ~= 0.00797*(neta*tauslice)+3.47): neta=64, tauslice=30 gives
+# neta*tauslice=1920, identical to the already-confirmed-working
+# neta=32/tauslice=60 point (18.73 GB actual) -- same predicted footprint on
+# this box's 24GB RTX 3090s. This only covers tau=0.44 to ~3.44 fm/c, well
+# short of these events' real freeze-out (tau~7-8 fm/c, see the pilot ROOT
+# file's own tau_freezeout array) -- the live pilot test will need either
+# rollout-window chaining or an inference-time Tfo workaround to reach
+# freeze-out; this config only trains the model, it doesn't decide that yet.
+#
+# Usage:
+#   python train_torch.py --config config_pilot_eta4_30_40.yaml
+# ---------------------------------------------------------------------------
+
+data_source: local
+input_dir: /home/cparker/jetscape-docker/rootfiles
+
+odir:      ./out_pilot_eta4_30_40
+model_dir: ./checkpoints_pilot_eta4_30_40
+
+input_files:
+  - AuAu_pilot5_30_40_eta4_n65.root
+
+nevents_in: -1
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d
+  alpha: 1.0
+
+# --- data preparation ---
+# Only 5 events total -- train_ratio=0.8 gives 4 train / 1 val. Too small to
+# generalize meaningfully; this is a directional pilot, not a final model.
+train_ratio: 0.8
+xyslice:  [null, -1]       # 65 -> 64, same off-by-one convention as x/y always use
+etaslice: [null, -1]       # raw neta=65 -> 64, no stride (range+count double, not resolution)
+tauslice: [null, 30]       # see header: memory-matched to the validated neta=32/tauslice=60 point
+min_ntau_freezeout: 10
+
+# --- model ---
+# Same architecture as the production model for a fair comparison -- only
+# the eta window changed.
+hidden_channels: 16
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau] -- eta modes unchanged at 16 despite neta doubling to 64, matching the production model's choice at neta=32 (modes stay well under axis/2 either way)
+
+# --- training ---
+n_epochs: 25
+batch_size: 1
+checkpoint_freq: null
+min_save_epoch:  null
+save_last: true
+eval_interval: 2
+test_batch_sizes: [2]
+
+# --- optimizer ---
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true

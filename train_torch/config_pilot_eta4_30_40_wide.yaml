@@ -1,0 +1,69 @@
+# ---------------------------------------------------------------------------
+# FNO training config -- PILOT v2, doubled eta range/cell count, 30-40% only
+#
+# Supersedes config_pilot_eta4_30_40.yaml (tauslice=30, hidden_channels=16):
+# that window only reached tau~3.34 fm/c, where the hottest cell was still
+# at ~192 MeV -- nowhere near the real ~150 MeV freeze-out these events need
+# (ntau_freezeout=66-76 at dtau=0.1 from the pilot ROOT file itself), so no
+# meaningful live-inference comparison was possible without an extreme,
+# physically-distorting Tfo workaround (~195-200 MeV).
+#
+# This version trades model WIDTH for tau COVERAGE instead: hidden_channels
+# halved 16->8 (spectral-conv weight tensors scale ~hidden_channels^2, so
+# this should free up much more than half the memory the
+# PARTICLIZATION_INVESTIGATION.md "Memory estimate" formula's fixed
+# ~3.47GB intercept attributes to the model/optimizer) to afford
+# tauslice=70 (tau=0.44 to ~7.34 fm/c -- actually covers these events' real
+# freeze-out window, unlike v1). Same 5-event pilot ROOT file, same
+# centrality, same architecture otherwise (n_modes unchanged). Reduced model
+# capacity is an accepted tradeoff for a directional pilot, not a concern
+# for a final model.
+#
+# Usage:
+#   python train_torch.py --config config_pilot_eta4_30_40_wide.yaml
+# ---------------------------------------------------------------------------
+
+data_source: local
+input_dir: /home/cparker/jetscape-docker/rootfiles
+
+odir:      ./out_pilot_eta4_30_40_wide
+model_dir: ./checkpoints_pilot_eta4_30_40_wide
+
+input_files:
+  - AuAu_pilot5_30_40_eta4_n65.root
+
+nevents_in: -1
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d
+  alpha: 1.0
+
+# --- data preparation ---
+train_ratio: 0.8
+xyslice:  [null, -1]
+etaslice: [null, -1]
+tauslice: [null, 65]      # covers tau=0.44 to ~6.84 fm/c -- reduced from 70
+                          # after that OOM'd by only 346 MiB on a 23.68GB
+                          # usable card; 65 gives a safe margin
+min_ntau_freezeout: 10
+
+# --- model ---
+hidden_channels: 8        # halved from the production/v1 value of 16 -- see header
+n_modes: [32, 32, 16, 16]
+
+# --- training ---
+n_epochs: 25
+batch_size: 1
+checkpoint_freq: null
+min_save_epoch:  null
+save_last: true
+eval_interval: 2
+test_batch_sizes: [2]
+
+# --- optimizer ---
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true
