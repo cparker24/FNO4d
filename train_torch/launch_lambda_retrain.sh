@@ -11,10 +11,18 @@
 #   ./launch_lambda_retrain.sh <instance-ip> [train-config] [ssh-user] [gcs-key-path] [ssh-key]
 #
 #   instance-ip   required. The Lambda instance's public IP.
-#   train-config  optional. Defaults to config_lambda_32step_tau120_maskedloss.yaml
-#                 (the tail-masked-loss retrain -- see
+#   train-config  optional. Defaults to config_lambda_widened_eta4_n65.yaml
+#                 (the full-scale doubled-eta-range/cell-count retrain,
+#                 hidden_channels=16, needs an 80GB A100/H100 -- see
 #                 js-contrib contribs/FnoHydro/PARTICLIZATION_INVESTIGATION.md's
-#                 "Root cause of the yield deficit" section).
+#                 "Pilot: doubling the trained eta range AND cell count"
+#                 and "Full-scale widened-eta training data generation"
+#                 sections). The previous default,
+#                 config_lambda_32step_tau120_maskedloss.yaml (the
+#                 tail-masked-loss retrain over the original eta2_n33 grid,
+#                 fits a 40GB A100 -- see that doc's "Root cause of the
+#                 yield deficit" section), is still available by passing it
+#                 explicitly as the 2nd argument.
 #   ssh-user      optional. Defaults to ubuntu (Lambda's default image user).
 #   gcs-key-path  optional. Defaults to train_gcs/fnotest-wayne-gcs.json next
 #                 to this script.
@@ -47,7 +55,7 @@ die()  { echo "[launch_lambda_retrain] ERROR: $*" >&2; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 INSTANCE_IP="${1:-}"
-TRAIN_CONFIG="${2:-config_lambda_32step_tau120_maskedloss.yaml}"
+TRAIN_CONFIG="${2:-config_lambda_widened_eta4_n65.yaml}"
 SSH_USER="${3:-ubuntu}"
 GCS_KEY_PATH="${4:-$SCRIPT_DIR/../train_gcs/fnotest-wayne-gcs.json}"
 SSH_KEY="${5:-$HOME/.ssh/id_ed25519}"
