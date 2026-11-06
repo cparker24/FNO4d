@@ -41,6 +41,7 @@ if data_source not in ('local', 'gcs_download', 'gcs_stream'):
 # ---------------------------------------------------------------------------
 # imports
 # ---------------------------------------------------------------------------
+import numpy as np
 import torch
 from neuralop.models import FNO
 from neuralop import Trainer
@@ -91,6 +92,7 @@ xyslice         = _slice(cfg.get('xyslice',  [None, -1]))
 etaslice        = _slice(cfg.get('etaslice', [None, None]))
 tauslice        = _slice(cfg.get('tauslice', [None, -1]))
 min_ntau_freezeout = cfg.get('min_ntau_freezeout', 10)
+drop_channels   = cfg.get('drop_channels', None)
 lr              = cfg['lr']
 weight_decay    = cfg.get('weight_decay', 1e-4)
 scheduler_cfg   = cfg.get('scheduler', {'name': 'cosine_annealing'})
@@ -160,6 +162,7 @@ log(f'xyslice:         {xyslice}')
 log(f'etaslice:        {etaslice}')
 log(f'tauslice:        {tauslice}')
 log(f'min_ntau_freezeout: {min_ntau_freezeout}')
+log(f'drop_channels:   {drop_channels}')
 log(f'log_directly:    {log_directly}')
 log(f'nevents(in):     {nevents_in}')
 log(f'AdamW: lr:         {lr}')
@@ -201,7 +204,7 @@ log(f'choose_ntau (pre-slice padding target): {choose_ntau}')
 # read_3d_data means the full raw-resolution array is never materialised at
 # all -- only the already-cropped/filtered one, at roughly its final size.
 _read_kwargs = dict(xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
-                     min_ntau_freezeout=min_ntau_freezeout)
+                     min_ntau_freezeout=min_ntau_freezeout, drop_channels=drop_channels)
 
 if data_source == 'local':
     arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, **_read_kwargs)
@@ -235,6 +238,24 @@ grid_params = {k: arr_data[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
 del arr_data
 gc.collect()
 log(f'[TIMING] del arr_data + gc.collect(): {perf_counter() - _t:.1f}s')
+
+# drop_channels is applied INSIDE read_3d_data (via _read_kwargs above), not
+# here -- it has to be, to keep the "crop during the chunked read, never
+# materialise the undropped array" property every other crop option
+# (xyslice/etaslice/tauslice/min_ntau_freezeout) already relies on. A
+# post-hoc np.delete() on the full returned array would briefly hold both the
+# original and the smaller copy in memory at once, the exact failure mode
+# that OOM-killed the eta4/n65 host-RAM read (see the comment above
+# _read_kwargs). By the time arr reaches here it is already at its final,
+# post-drop feature count.
+if drop_channels:
+    log(f'Dropped feature channel(s) {drop_channels} during the chunked read '
+        f'(full order is [energy_density, temperature, vx, vy, vz]) -- tests '
+        f'whether explicit temperature supervision helps or hurts vx/vy/vz '
+        f'reproduction, see FNO_VZ_BIAS_INVESTIGATION.md. A model trained this '
+        f'way has n_features=4, directly loadable by FnoHydro.cc\'s existing '
+        f'n_features==4 inference path (implicit temperature from channel 0 '
+        f'via the EOS on read-back).')
 
 log(f'nevents (constrained by input file(s)): {arr.shape[0]}')
 n_features = arr.shape[1]

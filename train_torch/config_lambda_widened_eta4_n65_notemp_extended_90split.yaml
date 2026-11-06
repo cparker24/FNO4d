@@ -1,0 +1,146 @@
+# ---------------------------------------------------------------------------
+# FNO training config — pure PyTorch — Lambda Cloud (1x A100/H100 80GB)
+#
+# Combined experimental retrain, based on config_lambda_widened_eta4_n65.yaml
+# (the current production eta4/n65 model), testing THREE changes at once per
+# an explicit request to combine them into a single run rather than isolate
+# each one separately:
+#
+#   1. drop_channels: [1] -- train WITHOUT explicit temperature supervision
+#      (energy_density, vx, vy, vz only; n_features drops from 5 to 4). See
+#      FNO_VZ_BIAS_INVESTIGATION.md: every external cause of the network's
+#      vx/vy/vz parity-symmetry bias has been ruled out (particlization,
+#      surface-finding, grid indexing, the training data itself), leaving
+#      only the network's own architecture/training as the remaining
+#      candidate. Explicit temperature supervision is itself a derived
+#      quantity (temperature = f(energy_density) via the EOS, already
+#      recoverable from channel 0 alone -- see FnoHydro.cc's existing
+#      n_features==4 inference path, which derives it this way at read-back
+#      time), so this tests whether forcing the network to also learn to
+#      reproduce it (a quantity it does not strictly need to predict) is
+#      competing for capacity/gradient signal with the velocity channels
+#      (vx/vy/vz) in a way that could plausibly contribute to their observed
+#      bias. Implemented via a new `drop_channels` option threaded through
+#      train_torch.py and read_3d_root.py's read_3d_data (per-chunk, like
+#      xyslice/etaslice/tauslice, never materializing the undropped array)
+#      -- see those files' own comments for the mechanism. A model trained
+#      this way is directly loadable by FnoHydro.cc's existing n_features==4
+#      code path with no inference-side changes needed.
+#
+#   2. n_epochs: 50 (vs. 25 in the baseline) -- the baseline run's own
+#      training log (PARTICLIZATION_INVESTIGATION.md: eval 64_l2 2.39->0.68
+#      over 25 epochs) was "still improving at epoch 24, not yet fully
+#      plateaued," so this tests whether the baseline recipe was simply
+#      under-trained rather than converged. CosineAnnealingLR's T_max
+#      tracks n_epochs automatically (train_torch.py), so the LR schedule
+#      stretches to match -- still a single full decay from 8e-3 to ~0, just
+#      over twice as many epochs, not a different schedule shape.
+#
+#   3. train_ratio: 0.9 (vs. 0.8 in the baseline) -- more training events,
+#      fewer held out for validation. Same positional-cut mechanism as the
+#      baseline (first 90% of the 4 centrality files concatenated in
+#      input_files order = train, remainder = validation) -- raising the
+#      ratio shrinks how much of the last file (30-40%) ends up in the
+#      held-out set; if validation-set size at this new ratio turns out too
+#      small to trust eval_losses, that's a sign this needs a non-positional
+#      (shuffled/stratified) split instead, not something this config alone
+#      can fix.
+#
+# Combining all three means a single training run cannot attribute any
+# resulting change in vz/vx/vy quality to one specific cause -- that
+# trade-off was made deliberately (one retrain's worth of GPU time instead
+# of three) rather than by accident; see FNO_VZ_BIAS_INVESTIGATION.md for
+# the discussion. If this run shows an improvement, isolating which of the
+# three actually mattered would need the separate single-variable configs
+# as a follow-up.
+#
+# Everything else (grid, xyslice/etaslice/tauslice, hidden_channels, n_modes,
+# normalization, optimizer) is unchanged from config_lambda_widened_eta4_n65.yaml
+# -- see that file's own header for the full rationale behind those choices.
+# VRAM should be at or slightly below the baseline's ~64.7GB estimate (one
+# fewer feature channel, same hidden_channels/grid), so the same 80GB A100/
+# H100 requirement applies; do not launch this on a 40GB instance.
+#
+# Usage:
+#   python train_torch.py --config config_lambda_widened_eta4_n65_notemp_extended_90split.yaml
+#
+# Run via setup_and_train_lambda.sh (same script, no changes needed --
+# TRAIN_CONFIG is already parameterized):
+#   TRAIN_CONFIG=config_lambda_widened_eta4_n65_notemp_extended_90split.yaml bash setup_and_train_lambda.sh
+# ---------------------------------------------------------------------------
+
+# --- mode selection ---
+data_source: gcs_download   # downloads input_files to local_data_dir, then trains locally
+
+# --- output ---
+odir:      ./out_lambda_widened_eta4_n65_notemp_extended_90split
+model_dir: ./checkpoints_lambda_widened_eta4_n65_notemp_extended_90split
+
+# --- input data ---
+# Same source ROOT files as the baseline -- drop_channels below removes
+# temperature during the read itself, no separate 4-feature dataset needed.
+input_files:
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_0_10_eta4_n65.root
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_10_20_eta4_n65.root
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_20_30_eta4_n65.root
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_30_40_eta4_n65.root
+
+nevents_in: -1            # events to load (-1 = all)
+
+# --- GCS authentication [gcs] ---
+# setup_and_train_lambda.sh copies this in from wherever you staged it on the
+# instance (see that script's header) -- it is NOT committed to git.
+gcs_key_file: ./fnotest-wayne-gcs.json
+
+# --- GCS download cache [download] ---
+local_data_dir:    ../data  # downloaded ROOT files are cached here
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ---
+# Separate run name from the baseline and every eta2_n33 run so none of
+# those checkpoints/logs are overwritten.
+gcs_output_prefix: gs://test_fno/runs/widened_eta4_n65_notemp_extended_90split
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d              # tau-only scaling of channel 0; unaffected by drop_channels below
+  alpha: 1.0
+
+# --- data preparation ---
+train_ratio: 0.9           # (1) 90/10 split -- see header
+drop_channels: [1]         # (2) drop temperature (index 1 of [rho, T, vx, vy, vz]) -- see header
+xyslice:  [null, -1]       # slice(None, -1) — drop last spatial bin (65 -> 64)
+# Raw neta=65 (power-of-2+1, DOUBLED from the eta2_n33 dataset's 33). Drop
+# ONLY the last bin (same off-by-one correction as x/y, 65 -> 64) -- no
+# stride, so all 64 remaining bins are kept at the raw 0.125 spacing.
+etaslice: [null, -1]
+# Unchanged from the baseline -- see that config's header: comfortably
+# covers this dataset's own verified max ntau_freezeout (117).
+tauslice: [null, 120]
+min_ntau_freezeout: 10     # drops the two bad events (0-10% idx39, 10-20% idx34); see baseline's header
+
+# --- model ---
+hidden_channels: 16
+# eta Fourier modes deliberately kept at 16 (not doubled to 32) -- unchanged
+# from the baseline.
+n_modes: [32, 32, 16, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 50               # (3) extended from the baseline's 25 -- see header
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+
+# --- optimizer ---
+# CosineAnnealingLR's T_max tracks n_epochs (=50 here, vs. 25 in the
+# baseline) -- still a single full decay from 8e-3 to ~0, just over twice
+# as many epochs.
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true        # mirror output to training.log

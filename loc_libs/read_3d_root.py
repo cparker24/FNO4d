@@ -7,7 +7,7 @@ import numpy as np
 def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
                  storage_options=None, verbose=False,
                  xyslice=None, etaslice=None, tauslice=None,
-                 min_ntau_freezeout=None):
+                 min_ntau_freezeout=None, drop_channels=None):
     ''' read events from a 3d root file; file_path may be a single path or a list of paths
     returns:
       {'data' : 6D numpy array,
@@ -28,6 +28,15 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
         once; see the "variable-length tau dimension" branch below for the
         full explanation). None (the default) keeps every event, unchanged
         behavior for any existing caller that doesn't pass this.
+    drop_channels : optional list of feature-axis indices to remove (e.g. [1]
+        for temperature, given RootBulkWriter.cc's fixed [energy_density,
+        temperature, vx, vy, vz] write order), applied per-chunk alongside
+        xyslice/etaslice/tauslice above for the same reason -- a post-hoc
+        drop on the full returned array would briefly hold both the original
+        and the smaller copy in memory at once. None (the default) keeps
+        every feature channel, unchanged behavior for any existing caller
+        that doesn't pass this. Only supported on the variable-length-tau
+        ("straight from .root") path below, not the legacy flat_data path.
     '''
 
     if verbose:
@@ -99,6 +108,11 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
     use_flat = 'flat_data' in file0['t'].keys()
 
     if use_flat:
+        if drop_channels:
+            raise NotImplementedError(
+                "drop_channels is only supported on the variable-length-tau "
+                "('straight from .root') read path, not the legacy flat_data "
+                "format this file uses.")
         print("reading flat_data")
         if end_event <= 0:
             end_event = total_entries
@@ -178,6 +192,21 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
         neta_out = len(range(*etaslice_r.indices(neta_raw)))
         ntau_out = len(range(*tauslice_r.indices(choose_ntau)))
 
+        # Same reasoning as the spatial/tau crops above, applied to the
+        # feature axis: resolve which channels to keep up front so the
+        # output array is allocated at its final (post-drop) feature count,
+        # and only ever index the small per-chunk array below, never the
+        # full one.
+        nFeatures_raw = int(dat['nFeatures'])
+        if drop_channels:
+            keep_channels = [i for i in range(nFeatures_raw) if i not in set(drop_channels)]
+            nFeatures_out = len(keep_channels)
+            print(f'Dropping feature channel(s) {sorted(drop_channels)} -> '
+                  f'keeping {keep_channels} ({nFeatures_raw} -> {nFeatures_out} features)')
+        else:
+            keep_channels = None  # keep all; skip the extra per-chunk fancy-index below
+            nFeatures_out = nFeatures_raw
+
         # Event-level filtering (dropping blank/near-blank records left by a
         # MUSIC crash partway through generation) is also done here, before
         # allocation, for the same reason -- this used to be applied by the
@@ -214,7 +243,7 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
         # Allocate the output array ONCE, up front -- already at its final
         # CROPPED/FILTERED shape (see above), not the full raw resolution.
         arr = np.zeros(
-            (nevents_out, ntau_out, nx_out, ny_out, neta_out, dat['nFeatures']), dtype=np.float32
+            (nevents_out, ntau_out, nx_out, ny_out, neta_out, nFeatures_out), dtype=np.float32
         )
 
         if verbose:
@@ -266,6 +295,17 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
             n_good_chunk = int(chunk_mask.sum())
             if n_good_chunk > 0:
                 cropped = padded[chunk_mask, tauslice_r, xyslice_r, xyslice_r, etaslice_r, :]
+                # Channel selection is a SEPARATE indexing step (not folded
+                # into the call above) because mixing a boolean mask with a
+                # fancy-index list, with plain slices in between, triggers
+                # numpy's "advanced indices not contiguous" broadcasting rule
+                # and silently reorders the output's axes -- doing it as its
+                # own step on the already-chunk-sized `cropped` array sidesteps
+                # that entirely, at the cost of one more chunk-sized (not
+                # dataset-sized) transient, which is the same trade every
+                # other per-chunk crop above already makes.
+                if keep_channels is not None:
+                    cropped = cropped[..., keep_channels]
                 arr[out_idx:out_idx + n_good_chunk] = cropped
                 out_idx += n_good_chunk
             out_idx_raw += n_chunk
@@ -285,6 +325,7 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
         arr = np.moveaxis(arr, 1, -1)
         arr = np.moveaxis(arr, -2, 1)
         dat['arr'] = arr
+        dat['nFeatures'] = nFeatures_out  # reflects any drop_channels applied above
 
         if verbose:
             current, peak = tracemalloc.get_traced_memory()
