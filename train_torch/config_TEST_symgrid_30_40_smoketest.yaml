@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# SMOKE TEST ONLY -- pipeline-correctness check for the new symmetric
+# x/y/eta grid convention (RootBulkWriter.cc fix: even point count, no cell
+# at 0, equal cells on either side -- see FNO_VZ_BIAS_INVESTIGATION.md).
+#
+# Single centrality (30-40%), few epochs, local data only. Not a production
+# training run -- purpose is only to confirm read_3d_root.py -> NormFn3d ->
+# FNO -> TailMaskedLoss -> checkpoint-save all run cleanly end to end
+# against data with the new grid metadata (nx=ny=neta=64, x_min=y_min=
+# -9.84375, eta_min=-3.9375 -- no crop needed, so xyslice/etaslice are
+# null here, unlike every other config in this project).
+#
+# Usage:
+#   python train_torch.py --config config_TEST_symgrid_30_40_smoketest.yaml
+# ---------------------------------------------------------------------------
+
+data_source: local
+
+odir:      ./out_TEST_symgrid_30_40_smoketest
+model_dir: ./checkpoints_TEST_symgrid_30_40_smoketest
+
+input_dir: /home/cparker/jetscape-docker/rootfiles
+input_files:
+  - AuAu_50ev_30_40_eta4_n65_symgrid.root
+
+nevents_in: -1
+
+normalization:
+  name: etau75_3d
+  alpha: 1.0
+
+train_ratio: 0.8
+# New grid is natively 64x64x64 with no edge bin to crop -- unlike every
+# other config in this project, these are no-ops (null), not [null,-1].
+xyslice:  null
+etaslice: null
+tauslice: [null, 20]       # reduced from production's 120 purely to fit this local 24GB GPU -- VRAM is activation-bound and scales with neta*tauslice (see FNO_VZ_BIAS_INVESTIGATION.md's memory-scaling formula); this is a pipeline-correctness smoke test, not a VRAM-fit test (the real architecture already needs an 80GB card, unrelated to the grid fix)
+min_ntau_freezeout: 10
+
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]
+
+n_epochs: 3                # smoke test only -- just needs to run cleanly, not converge
+batch_size: 1
+checkpoint_freq: null
+min_save_epoch:  null
+save_last: true
+eval_interval: 1           # eval every epoch since there are only 3 -- want to see eval actually run
+test_batch_sizes: [2]
+
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+log_directly: true

@@ -1,0 +1,123 @@
+# ---------------------------------------------------------------------------
+# FNO training config — pure PyTorch — Lambda Cloud (1x A100/H100 80GB)
+#
+# First training run on the SYMMETRIC-GRID training data (RootBulkWriter.cc
+# commit da3ea4cc in X-SCAPE): the previous nx/ny/neta = 2*N+1 convention put
+# one grid point exactly at 0 on every axis, which after the standard
+# training-time [:-1] crop left an asymmetric domain (one fewer cell on the
+# positive side than the negative side) on x, y, AND eta -- a real, confirmed
+# source of broken mirror symmetry (see FNO_VZ_BIAS_INVESTIGATION.md). The
+# new data has an even grid count with the sampled points shifted by half a
+# cell, so x=y=eta=0 never falls on a grid point and the domain is exactly
+# symmetric on every axis already, with NO edge bin to crop -- see
+# "xyslice/etaslice" below.
+#
+# Stacks on top of config_lambda_widened_eta4_n65_notemp_extended_90split_
+# etamodes32.yaml (same notemp/50-epoch/90-10-split recipe + eta Fourier
+# modes doubled 16->32, both already validated: notemp/extended/90split
+# measurably shrank the v1{2} directed-flow excess at 3/4 centralities --
+# see FNO_VZ_BIAS_INVESTIGATION.md's "Does the full Cooper-Frye pipeline
+# confirm..." section -- and the etamodes32 memory estimate was verified
+# directly against the vendored neuralop library: ~151M -> ~302M params,
+# net projected peak ~66GB, comfortably under the 80GB card). See that
+# config's own header for the full rationale behind both.
+#
+# Held-out validation events (20 per centrality, seed 802701 -- distinct
+# from training data's seeds) were generated alongside this training data.
+# Used here via validation_files (see train_torch.py) instead of
+# train_ratio's positional split of input_files: ALL of input_files trains,
+# and these dedicated, differently-seeded files are the entire eval set --
+# a genuine held-out draw rather than the tail slice of the same 4 files.
+# They can also be used later for comparing the trained model's LIVE
+# inference output against true MUSIC.
+#
+# Usage:
+#   python train_torch.py --config config_lambda_symgrid_eta4_n65_notemp_extended_90split_etamodes32.yaml
+#
+# Run via setup_and_train_lambda.sh (same script, no changes needed --
+# TRAIN_CONFIG is already parameterized):
+#   TRAIN_CONFIG=config_lambda_symgrid_eta4_n65_notemp_extended_90split_etamodes32.yaml bash setup_and_train_lambda.sh
+# ---------------------------------------------------------------------------
+
+# --- mode selection ---
+data_source: gcs_download   # downloads input_files to local_data_dir, then trains locally
+
+# --- output ---
+odir:      ./out_lambda_symgrid_eta4_n65_notemp_extended_90split_etamodes32
+model_dir: ./checkpoints_lambda_symgrid_eta4_n65_notemp_extended_90split_etamodes32
+
+# --- input data ---
+# Symmetric-grid training data (RootBulkWriter.cc commit da3ea4cc) -- see
+# header. drop_channels below removes temperature during the read itself,
+# no separate dataset needed.
+input_files:
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_0_10_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_10_20_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_20_30_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_30_40_eta4_n65_symgrid.root
+
+# Dedicated validation set (20 events/centrality, seed 802701) -- see header.
+# train_ratio below is ignored while this is set; ALL of input_files trains.
+validation_files:
+  - gs://test_fno/validation_data/eta4_n65_symgrid/AuAu_valid20ev_0_10_eta4_n65_symgrid.root
+  - gs://test_fno/validation_data/eta4_n65_symgrid/AuAu_valid20ev_10_20_eta4_n65_symgrid.root
+  - gs://test_fno/validation_data/eta4_n65_symgrid/AuAu_valid20ev_20_30_eta4_n65_symgrid.root
+  - gs://test_fno/validation_data/eta4_n65_symgrid/AuAu_valid20ev_30_40_eta4_n65_symgrid.root
+
+nevents_in: -1            # events to load (-1 = all), applies to both input_files and validation_files
+
+# --- GCS authentication [gcs] ---
+# setup_and_train_lambda.sh copies this in from wherever you staged it on the
+# instance (see that script's header) -- it is NOT committed to git.
+gcs_key_file: ./fnotest-wayne-gcs.json
+
+# --- GCS download cache [download] ---
+local_data_dir:    ../data  # downloaded ROOT files are cached here
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ---
+# Separate run name from every other retrain so none of those
+# checkpoints/logs are overwritten.
+gcs_output_prefix: gs://test_fno/runs/symgrid_eta4_n65_notemp_extended_90split_etamodes32
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d              # tau-only scaling of channel 0; unaffected by drop_channels below
+  alpha: 1.0
+
+# --- data preparation ---
+train_ratio: 0.9           # ignored -- validation_files is set above, so ALL of input_files trains
+drop_channels: [1]         # drop temperature (index 1 of [rho, T, vx, vy, vz]) -- see that config's header
+# The symmetric grid is already exactly 64 wide on every spatial axis, with
+# no structural edge bin (unlike the old 65-wide grid's xyslice/etaslice:
+# [null,-1] crop) -- confirmed directly via the regeneration's own smoke
+# test (nx/ny/neta: 64 -> 64, no cropping occurred). null = no slicing.
+xyslice:  null
+etaslice: null
+# Unchanged from the baseline -- comfortably covers this dataset's own
+# verified max ntau_freezeout (117).
+tauslice: [null, 120]
+min_ntau_freezeout: 10     # drops events with too-short freezeout histories; see baseline's header
+
+# --- model ---
+hidden_channels: 16
+# eta Fourier modes doubled 16 -> 32, now matching x/y -- see header.
+n_modes: [32, 32, 32, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 50               # unchanged from the notemp/extended/90split config -- see its header
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+
+# --- optimizer ---
+# CosineAnnealingLR's T_max tracks n_epochs (=50 here).
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true        # mirror output to training.log

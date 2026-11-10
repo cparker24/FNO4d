@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# SMOKE TEST ONLY -- correctness check for the new `validation_files`
+# mechanism in train_torch.py: dedicated validation file(s), read and
+# normalized the same way as input_files but never positionally split out
+# of them. Single centrality (30-40%), few epochs, local data only.
+#
+# Purpose: confirm the new validation_files code path in train_torch.py
+# (reading two independent file lists, asserting their shapes match,
+# fitting the normalizer on train only, training on ALL of input_files
+# while evaluating on ALL of validation_files) runs cleanly end to end.
+# Not a production training run.
+#
+# Usage:
+#   python train_torch.py --config config_TEST_symgrid_validationfiles_smoketest.yaml
+# ---------------------------------------------------------------------------
+
+data_source: local
+
+odir:      ./out_TEST_symgrid_validationfiles_smoketest
+model_dir: ./checkpoints_TEST_symgrid_validationfiles_smoketest
+
+input_dir: /home/cparker/jetscape-docker/rootfiles
+input_files:
+  - AuAu_50ev_30_40_eta4_n65_symgrid.root
+validation_files:
+  - AuAu_valid20ev_30_40_eta4_n65_symgrid.root
+
+nevents_in: -1
+
+normalization:
+  name: etau75_3d
+  alpha: 1.0
+
+train_ratio: 0.8           # ignored -- validation_files is set
+xyslice:  null
+etaslice: null
+tauslice: [null, 20]       # reduced purely to fit this local 24GB GPU -- pipeline-correctness test, not a VRAM-fit test
+min_ntau_freezeout: 10
+
+hidden_channels: 16
+n_modes: [32, 32, 16, 16]
+
+n_epochs: 3                # smoke test only -- just needs to run cleanly, not converge
+batch_size: 1
+checkpoint_freq: null
+min_save_epoch:  null
+save_last: true
+eval_interval: 1
+test_batch_sizes: [2]
+
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+log_directly: true

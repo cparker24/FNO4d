@@ -79,6 +79,14 @@ def _slice(val):
 
 odir            = cfg['odir']
 input_files     = cfg['input_files']
+# Dedicated validation files, read and normalized the same way as
+# input_files but never seen during training -- an alternative to
+# train_ratio's positional split of input_files itself. When set,
+# train_ratio is ignored and ALL of input_files is used for training.
+# Intended for held-out validation events generated separately (different
+# random seed) from the training data, so the eval split is a genuine
+# distinct draw rather than the tail slice of the same files.
+validation_files = cfg.get('validation_files', None)
 n_epochs        = cfg['n_epochs']
 batch_size      = cfg['batch_size']
 hidden_channels = cfg['hidden_channels']
@@ -141,6 +149,7 @@ log(f'config:          {args.config}')
 log(f'backend:         torch')
 log(f'data_source:     {data_source}')
 log(f'input files:     {input_files}')
+log(f'validation_files: {validation_files}')
 if data_source == 'local':
     log(f'input dir:       {input_dir}')
 elif data_source == 'gcs_download':
@@ -157,12 +166,12 @@ log(f'hidden_channels: {hidden_channels}')
 log(f'checkpoint_freq: {checkpoint_freq}')
 log(f'min_save_epoch:  {min_save_epoch}')
 log(f'n_modes:         {n_modes}')
-log(f'train_ratio:     {train_ratio}')
 log(f'xyslice:         {xyslice}')
 log(f'etaslice:        {etaslice}')
 log(f'tauslice:        {tauslice}')
 log(f'min_ntau_freezeout: {min_ntau_freezeout}')
 log(f'drop_channels:   {drop_channels}')
+log(f'train_ratio:     {train_ratio}' + (' (ignored -- validation_files set)' if validation_files else ''))
 log(f'log_directly:    {log_directly}')
 log(f'nevents(in):     {nevents_in}')
 log(f'AdamW: lr:         {lr}')
@@ -206,29 +215,40 @@ log(f'choose_ntau (pre-slice padding target): {choose_ntau}')
 _read_kwargs = dict(xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
                      min_ntau_freezeout=min_ntau_freezeout, drop_channels=drop_channels)
 
-if data_source == 'local':
-    arr_data = read_3d_data([f'{input_dir}/{f}' for f in input_files], nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, **_read_kwargs)
+def _load(files, label):
+    """Dispatch a file list through the configured data_source, exactly as
+    the single input_files read used to -- factored out so validation_files
+    (a second, independent file list) can be read the same way without
+    duplicating the data_source if/elif/else three times."""
+    if data_source == 'local':
+        return read_3d_data([f'{input_dir}/{f}' for f in files], nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, **_read_kwargs)
+    elif data_source == 'gcs_download':
+        log(f'Downloading {len(files)} {label} file(s) from GCS ...')
+        t_dl = perf_counter()
+        local_files = download_gcs_files(
+            files, local_data_dir, gcs_key_file, overwrite=overwrite_cache,
+            show_progress=gcs_show_progress,
+        )
+        log(f'Download complete in {perf_counter() - t_dl:.1f}s')
+        for gs_uri, local_path in zip(files, local_files):
+            log(f'  {gs_uri}  →  {local_path}')
+        return read_3d_data(local_files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, **_read_kwargs)
+    else:  # gcs_stream
+        storage_options = get_gcs_storage_options(gcs_key_file)
+        return read_3d_data(files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, storage_options=storage_options, **_read_kwargs)
 
-elif data_source == 'gcs_download':
-    log(f'Downloading {len(input_files)} file(s) from GCS ...')
-    t_dl = perf_counter()
-    local_files = download_gcs_files(
-        input_files, local_data_dir, gcs_key_file, overwrite=overwrite_cache,
-        show_progress=gcs_show_progress,
-    )
-    log(f'Download complete in {perf_counter() - t_dl:.1f}s')
-    for gs_uri, local_path in zip(input_files, local_files):
-        log(f'  {gs_uri}  →  {local_path}')
-    arr_data = read_3d_data(local_files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, **_read_kwargs)
-
-else:  # gcs_stream
-    storage_options = get_gcs_storage_options(gcs_key_file)
-    arr_data = read_3d_data(input_files, nevents=nevents_in, choose_ntau=choose_ntau, local_rank=None, storage_options=storage_options, **_read_kwargs)
+arr_data = _load(input_files, 'training')
+arr_data_val = _load(validation_files, 'validation') if validation_files else None
 
 log('Data parameters from input file:')
 for key in arr_data.keys():
     if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
         log(f'  {key}: {arr_data[key]}')
+if arr_data_val is not None:
+    log('Data parameters from validation file:')
+    for key in arr_data_val.keys():
+        if key not in ('arr', 'tau_freezeout', 'ntau_freezeout'):
+            log(f'  {key}: {arr_data_val[key]}')
 
 # arr_data['arr'] is already cropped (xyslice/etaslice/tauslice) and filtered
 # (min_ntau_freezeout) by read_3d_data -- no further indexing needed here.
@@ -236,6 +256,16 @@ _t = perf_counter()
 arr = arr_data['arr']
 grid_params = {k: arr_data[k] for k in ('tau_min', 'dtau', 'eta_min', 'deta')}
 del arr_data
+if arr_data_val is not None:
+    arr_val = arr_data_val['arr']
+    # Must match on everything but the event-count axis for the same model/
+    # normalizer/test_loader to apply to both -- a real mismatch here (e.g.
+    # validation data generated on a different grid) would silently corrupt
+    # training rather than error out downstream, so check it explicitly.
+    assert arr_val.shape[1:] == arr.shape[1:], (
+        f'validation_files grid/feature shape {arr_val.shape[1:]} does not '
+        f'match input_files shape {arr.shape[1:]}')
+    del arr_data_val
 gc.collect()
 log(f'[TIMING] del arr_data + gc.collect(): {perf_counter() - _t:.1f}s')
 
@@ -265,10 +295,17 @@ test_resolutions = [arr.shape[2]]
 # ---------------------------------------------------------------------------
 # train / val split
 # ---------------------------------------------------------------------------
-n_train     = int(arr.shape[0] * train_ratio)
-data_train  = arr[:n_train]
-data_verify = arr[n_train:]
-del arr
+if validation_files:
+    # All of input_files trains; validation_files (read separately above) is
+    # the entire eval set -- no positional split of input_files itself.
+    data_train  = arr
+    data_verify = arr_val
+    del arr, arr_val
+else:
+    n_train     = int(arr.shape[0] * train_ratio)
+    data_train  = arr[:n_train]
+    data_verify = arr[n_train:]
+    del arr
 gc.collect()
 
 log(f'shapes train:  {data_train.shape}')

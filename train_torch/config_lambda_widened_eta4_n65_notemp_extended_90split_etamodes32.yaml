@@ -1,0 +1,131 @@
+# ---------------------------------------------------------------------------
+# FNO training config — pure PyTorch — Lambda Cloud (1x A100/H100 80GB)
+#
+# Stacks a fourth change on top of config_lambda_widened_eta4_n65_notemp_
+# extended_90split.yaml (the notemp/50-epoch/90-10-split retrain, which
+# measurably shrank the v1{2} directed-flow excess at 3/4 centralities --
+# see FNO_VZ_BIAS_INVESTIGATION.md's "Does the full Cooper-Frye pipeline
+# confirm..." section):
+#
+#   4. n_modes: [32, 32, 32, 16] -- eta Fourier modes doubled from 16 to 32,
+#      now matching x/y. Every config up to and including this project's
+#      baseline deliberately kept eta modes at 16 "not doubled to 32" with
+#      no justification beyond caution; this is the first run that tests
+#      lifting that restriction. Motivation: training-recipe changes
+#      (temperature-dropping, more epochs, more training data) are now
+#      fairly well exhausted as explanations/fixes for the vz oddness
+#      bias, so the natural next lever is model capacity/expressiveness,
+#      and eta resolution is the grid axis this architecture represents
+#      most coarsely relative to x/y.
+#
+# Memory estimate: verified directly against the vendored neuralop library
+# (FNO4d/neuraloperator-4d-2.0.0) that this architecture's SpectralConv
+# allocates its FFT working buffers at the FULL grid resolution every
+# layer (fft_size = input tensor's spatial shape), not cropped to
+# n_modes -- mode truncation only slices a small sub-tensor for the
+# learned weight contraction. So activation/FFT memory (measured ~61.7GB
+# of the notemp/extended/90split run's 63.94GB peak CUDA, ~96.5% of the
+# total) is essentially insensitive to n_modes, while parameter count
+# (and the much smaller weight/gradient/optimizer-state memory, ~2.25GB
+# at the current size) roughly doubles with eta modes 16->32 (151M ->
+# 302M params, confirmed via direct `FNO(...)` instantiation). Net
+# projected peak: ~66GB, comfortably under the 80GB card (~14GB margin).
+# By contrast, widening hidden_channels or adding depth was projected to
+# blow past 80GB (activation-bound, not weight-bound) -- this is the one
+# capacity lever that fits the existing hardware without new plumbing
+# (checkpointing, mixed precision) or a bigger GPU.
+#
+# As with every other memory estimate in this investigation: this is a
+# planning estimate from first principles plus one real calibration
+# point (the notemp/extended/90split run's actual peak CUDA usage), not
+# a guarantee -- recommend watching the first few training steps before
+# trusting it for the full run.
+#
+# Everything else (grid, xyslice/etaslice/tauslice, hidden_channels,
+# drop_channels, n_epochs, train_ratio, optimizer) is unchanged from
+# config_lambda_widened_eta4_n65_notemp_extended_90split.yaml -- see that
+# file's own header for the rationale behind those choices.
+#
+# Usage:
+#   python train_torch.py --config config_lambda_widened_eta4_n65_notemp_extended_90split_etamodes32.yaml
+#
+# Run via setup_and_train_lambda.sh (same script, no changes needed --
+# TRAIN_CONFIG is already parameterized):
+#   TRAIN_CONFIG=config_lambda_widened_eta4_n65_notemp_extended_90split_etamodes32.yaml bash setup_and_train_lambda.sh
+# ---------------------------------------------------------------------------
+
+# --- mode selection ---
+data_source: gcs_download   # downloads input_files to local_data_dir, then trains locally
+
+# --- output ---
+odir:      ./out_lambda_widened_eta4_n65_notemp_extended_90split_etamodes32
+model_dir: ./checkpoints_lambda_widened_eta4_n65_notemp_extended_90split_etamodes32
+
+# --- input data ---
+# Same source ROOT files as every other eta4/n65 run -- drop_channels below
+# removes temperature during the read itself, no separate dataset needed.
+input_files:
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_0_10_eta4_n65.root
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_10_20_eta4_n65.root
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_20_30_eta4_n65.root
+  - gs://test_fno/training_data/eta4_n65/AuAu_50ev_30_40_eta4_n65.root
+
+nevents_in: -1            # events to load (-1 = all)
+
+# --- GCS authentication [gcs] ---
+# setup_and_train_lambda.sh copies this in from wherever you staged it on the
+# instance (see that script's header) -- it is NOT committed to git.
+gcs_key_file: ./fnotest-wayne-gcs.json
+
+# --- GCS download cache [download] ---
+local_data_dir:    ../data  # downloaded ROOT files are cached here
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ---
+# Separate run name from every other retrain so none of those
+# checkpoints/logs are overwritten.
+gcs_output_prefix: gs://test_fno/runs/widened_eta4_n65_notemp_extended_90split_etamodes32
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d              # tau-only scaling of channel 0; unaffected by drop_channels below
+  alpha: 1.0
+
+# --- data preparation ---
+train_ratio: 0.9           # 90/10 split -- see the notemp/extended/90split config's header
+drop_channels: [1]         # drop temperature (index 1 of [rho, T, vx, vy, vz]) -- see that config's header
+xyslice:  [null, -1]       # slice(None, -1) — drop last spatial bin (65 -> 64)
+# Raw neta=65 (power-of-2+1, DOUBLED from the eta2_n33 dataset's 33). Drop
+# ONLY the last bin (same off-by-one correction as x/y, 65 -> 64) -- no
+# stride, so all 64 remaining bins are kept at the raw 0.125 spacing.
+# NOTE: this crop makes the trained-on eta domain [-4.0, +3.875] -- one
+# grid cell short on the positive side, not symmetric about eta=0 despite
+# eta=0 itself still landing exactly on a cell center (index 32 of 64).
+etaslice: [null, -1]
+# Unchanged from the baseline -- comfortably covers this dataset's own
+# verified max ntau_freezeout (117).
+tauslice: [null, 120]
+min_ntau_freezeout: 10     # drops the two bad events (0-10% idx39, 10-20% idx34); see baseline's header
+
+# --- model ---
+hidden_channels: 16
+# eta Fourier modes doubled 16 -> 32, now matching x/y -- see header.
+n_modes: [32, 32, 32, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 50               # unchanged from the notemp/extended/90split config -- see its header
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+
+# --- optimizer ---
+# CosineAnnealingLR's T_max tracks n_epochs (=50 here).
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true        # mirror output to training.log
