@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # setup_and_train_lambda.sh
 #
-# Clones FNO4d, installs its environment, runs the widened-eta /
-# full-tauslice training job (config_lambda_32step_tau120.yaml), and relies
-# on train_torch.py's own end-of-run step to upload the trained checkpoint
-# and logs back to GCS. Meant for a fresh Lambda Cloud GPU instance (sized
-# for a single A100 40GB -- see config_lambda_32step_tau120.yaml's header
+# Clones FNO4d, installs its environment, runs the symmetric-grid /
+# notemp-extended-90split / etamodes32 training job
+# (config_lambda_symgrid_eta4_n65_notemp_extended_90split_etamodes32.yaml),
+# and relies on train_torch.py's own end-of-run step to upload the trained
+# checkpoint and logs back to GCS. Meant for a fresh Lambda Cloud GPU
+# instance (sized for a single A100/H100 80GB -- see that config's header
 # for the memory estimate this targets).
 #
 # Clones from the GitHub mirror (github.com/cparker24/FNO4d, cparker/FNO-3D
@@ -39,11 +40,13 @@
 #     vendored neuraloperator fork, and detects/installs a CUDA-matching
 #     torch build if one isn't already importable)
 #   - Copies the staged GCS key into train_torch/
-#   - Runs training with config_lambda_32step_tau120.yaml. Input ROOT files
-#     are downloaded from gs://test_fno/training_data/widened_eta_n33/ to
-#     ../data/ on first run (cached after that); the trained checkpoint and
-#     logs are uploaded back to
-#     gs://test_fno/runs/widened_eta_32step_tau120_lambda/{checkpoints,logs}
+#   - Runs training with
+#     config_lambda_symgrid_eta4_n65_notemp_extended_90split_etamodes32.yaml.
+#     Input (training + dedicated validation) ROOT files are downloaded from
+#     gs://test_fno/training_data/eta4_n65_symgrid/ and
+#     gs://test_fno/validation_data/eta4_n65_symgrid/ to ../data/ on first
+#     run (cached after that); the trained checkpoint and logs are uploaded
+#     back to gs://test_fno/runs/symgrid_eta4_n65_notemp_extended_90split_etamodes32/{checkpoints,logs}
 #     automatically by train_torch.py itself (gcs_output_prefix in the
 #     config) -- no separate upload step needed here.
 #
@@ -59,7 +62,7 @@ FNO4D_REPO_URL="${FNO4D_REPO_URL:-https://github.com/cparker24/FNO4d.git}"
 FNO4D_BRANCH="${FNO4D_BRANCH:-cparker/FNO-3D}"
 FNO4D_DIR="${FNO4D_DIR:-$HOME/FNO4d}"
 GCS_KEY_SRC="${GCS_KEY_SRC:-$HOME/fnotest-wayne-gcs.json}"
-TRAIN_CONFIG="${TRAIN_CONFIG:-config_lambda_32step_tau120.yaml}"
+TRAIN_CONFIG="${TRAIN_CONFIG:-config_lambda_symgrid_eta4_n65_notemp_extended_90split_etamodes32.yaml}"
 
 # ── sanity checks before doing anything slow ────────────────────────────────
 command -v nvidia-smi >/dev/null 2>&1 || die "nvidia-smi not found -- is this a GPU instance?"
