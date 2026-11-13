@@ -50,11 +50,25 @@ model_dir: ./checkpoints_lambda_symgrid_eta4_n65_notemp_extended_90split_etamode
 # Symmetric-grid training data (RootBulkWriter.cc commit da3ea4cc) -- see
 # header. drop_channels below removes temperature during the read itself,
 # no separate dataset needed.
+#
+# Doubled from 50 to 100 events/centrality: the "_v2" files are a second,
+# independently-generated batch (xmls/AuAu_50ev_v2_{cen}_eta4_n65_symgrid.xml)
+# -- same grid/physics settings as the originals. 0-10/10-20/20-30% kept
+# seed=0 (JETSCAPE's randomize-from-clock convention, so simply re-running
+# already drew a fresh batch); 30-40% was re-seeded to 741852963 (its
+# original seed, 424242, is fixed and is also reused by this session's live
+# Cooper-Frye particlization comparison runs for that centrality -- reusing
+# it here would've risked an identical-event overlap, not a true second
+# batch).
 input_files:
   - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_0_10_eta4_n65_symgrid.root
   - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_10_20_eta4_n65_symgrid.root
   - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_20_30_eta4_n65_symgrid.root
   - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_30_40_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_v2_0_10_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_v2_10_20_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_v2_20_30_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_v2_30_40_eta4_n65_symgrid.root
 
 # Dedicated validation set (20 events/centrality, seed 802701) -- see header.
 # train_ratio below is ignored while this is set; ALL of input_files trains.
