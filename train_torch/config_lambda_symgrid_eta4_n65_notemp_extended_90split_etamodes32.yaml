@@ -100,6 +100,19 @@ normalization:
   name: etau75_3d              # tau-only scaling of channel 0; unaffected by drop_channels below
   alpha: 1.0
 
+# Master train+val arrays stored as float16 instead of float32: the doubled
+# (8-file) dataset's host-RAM-resident arrays are ~223GB at float32, which
+# OOM-killed a 430GB-advertised Lambda node that turned out to have only
+# ~220GB usable. float16 storage halves that to ~112GB. Every per-batch
+# consumer already upcasts to float32 before the model sees it
+# (FluidDataset._to_tensor does torch.FloatTensor(arr)), so this only costs
+# precision in the long-lived host array (measured ~0.1% relative error on
+# the normalised energy density channel) -- not what reaches the model.
+# NormFn3d's tau/eta broadcast arrays are also now cast to match this dtype
+# (see NormFn3d.py), avoiding a separate float64-promotion blowup that would
+# otherwise undo the saving during normalization.
+storage_dtype: float16
+
 # --- data preparation ---
 train_ratio: 0.9           # ignored -- validation_files is set above, so ALL of input_files trains
 drop_channels: [1]         # drop temperature (index 1 of [rho, T, vx, vy, vz]) -- see that config's header

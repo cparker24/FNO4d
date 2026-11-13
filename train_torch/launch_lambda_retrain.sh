@@ -55,7 +55,7 @@ die()  { echo "[launch_lambda_retrain] ERROR: $*" >&2; exit 1; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 INSTANCE_IP="${1:-}"
-TRAIN_CONFIG="${2:-config_lambda_widened_eta4_n65.yaml}"
+TRAIN_CONFIG="${2:-config_lambda_symgrid_eta4_n65_notemp_extended_90split_etamodes32.yaml}"
 SSH_USER="${3:-ubuntu}"
 GCS_KEY_PATH="${4:-$SCRIPT_DIR/../train_gcs/fnotest-wayne-gcs.json}"
 SSH_KEY="${5:-$HOME/.ssh/id_ed25519}"

@@ -101,6 +101,12 @@ etaslice        = _slice(cfg.get('etaslice', [None, None]))
 tauslice        = _slice(cfg.get('tauslice', [None, -1]))
 min_ntau_freezeout = cfg.get('min_ntau_freezeout', 10)
 drop_channels   = cfg.get('drop_channels', None)
+# Storage dtype for the master train/val arrays held in host RAM -- 'float32'
+# (default, unchanged behavior) or 'float16' to halve their resident size on
+# a host-RAM-bound run. Every per-batch consumer already upcasts to float32
+# before the model sees it (FluidDataset._to_tensor / collate.py), so this
+# only trades precision in the long-lived host array, not model input dtype.
+storage_dtype   = np.dtype(cfg.get('storage_dtype', 'float32'))
 lr              = cfg['lr']
 weight_decay    = cfg.get('weight_decay', 1e-4)
 scheduler_cfg   = cfg.get('scheduler', {'name': 'cosine_annealing'})
@@ -213,7 +219,8 @@ log(f'choose_ntau (pre-slice padding target): {choose_ntau}')
 # read_3d_data means the full raw-resolution array is never materialised at
 # all -- only the already-cropped/filtered one, at roughly its final size.
 _read_kwargs = dict(xyslice=xyslice, etaslice=etaslice, tauslice=tauslice,
-                     min_ntau_freezeout=min_ntau_freezeout, drop_channels=drop_channels)
+                     min_ntau_freezeout=min_ntau_freezeout, drop_channels=drop_channels,
+                     dtype=storage_dtype)
 
 def _load(files, label):
     """Dispatch a file list through the configured data_source, exactly as

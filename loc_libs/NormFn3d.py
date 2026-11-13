@@ -88,7 +88,13 @@ class NormFn3d:
         out : same shape as *data*; feature 0 = ed^0.75 · τ, others unchanged.
         """
         nT  = data.shape[-1]
-        tau = (np.arange(nT) * dtau + tau_min).reshape(1, 1, 1, 1, nT)
+        # np.arange(nT) is int64; * dtau + tau_min (python floats) promotes it
+        # to float64. Left as float64, the channel-0 multiply below (data[:,0]
+        # is float16/float32) would silently upcast its *entire* output to
+        # float64 -- a transient 2-4x the size of an already dataset-sized
+        # slice. Casting tau down to data's own dtype first keeps that
+        # multiply (and the temporary it produces) at data's own width.
+        tau = (np.arange(nT) * dtau + tau_min).astype(data.dtype, copy=False).reshape(1, 1, 1, 1, nT)
         out = data if in_place else data.copy()
         out[:, 0] = data[:, 0] ** 0.75 * tau
         return out
@@ -113,7 +119,7 @@ class NormFn3d:
         out : same shape as *data* with physical energy density restored.
         """
         nT  = data.shape[-1]
-        tau = (np.arange(nT) * dtau + tau_min).reshape(1, 1, 1, 1, nT)
+        tau = (np.arange(nT) * dtau + tau_min).astype(data.dtype, copy=False).reshape(1, 1, 1, 1, nT)
         out = data.copy()
         base = np.clip(np.nan_to_num(data[:, 0] / (tau + eps), nan=0.0), 0.0, None)
         out[:, 0] = base ** (1.0 / 0.75)
@@ -162,7 +168,7 @@ class NormFn3d:
         ref : (n_eta, n_tau) normalisation map
         """
         nT  = train_data.shape[-1]
-        tau = (np.arange(nT) * dtau + tau_min).reshape(1, 1, 1, 1, nT)
+        tau = (np.arange(nT) * dtau + tau_min).astype(train_data.dtype, copy=False).reshape(1, 1, 1, 1, nT)
 
         # ed^0.75 * τ  →  (n_train, nx, ny, n_eta, n_tau)
         ed_scaled = train_data[:, 0] ** 0.75 * tau
@@ -204,7 +210,7 @@ class NormFn3d:
         ref : (n_eta, n_tau) — save alongside the model for inversion
         """
         nT  = data.shape[-1]
-        tau = (np.arange(nT) * dtau + tau_min).reshape(1, 1, 1, 1, nT)
+        tau = (np.arange(nT) * dtau + tau_min).astype(data.dtype, copy=False).reshape(1, 1, 1, 1, nT)
 
         out = data.copy()
         out[:, 0] = data[:, 0] ** 0.75 * tau            # (n_events, nx, ny, n_eta, n_tau)
@@ -240,7 +246,7 @@ class NormFn3d:
         out : same shape as *data* with physical energy density restored.
         """
         nT  = data.shape[-1]
-        tau = (np.arange(nT) * dtau + tau_min).reshape(1, 1, 1, 1, nT)
+        tau = (np.arange(nT) * dtau + tau_min).astype(data.dtype, copy=False).reshape(1, 1, 1, 1, nT)
 
         out = data.copy()
         ed_rescaled = data[:, 0] * ref[np.newaxis, np.newaxis, np.newaxis, :, :]
@@ -297,8 +303,8 @@ class NormFn3d:
         """
         n_eta = data.shape[4]
         nT    = data.shape[5]
-        eta = (np.arange(n_eta) * deta  + eta_min).reshape(1, 1, 1, n_eta, 1)
-        tau = (np.arange(nT)    * dtau  + tau_min).reshape(1, 1, 1, 1,    nT)
+        eta = (np.arange(n_eta) * deta  + eta_min).astype(data.dtype, copy=False).reshape(1, 1, 1, n_eta, 1)
+        tau = (np.arange(nT)    * dtau  + tau_min).astype(data.dtype, copy=False).reshape(1, 1, 1, 1,    nT)
 
         out = data.copy()
         out[:, 0] = (data[:, 0] * np.cosh(eta) ** alpha) ** 0.75 * tau
@@ -335,8 +341,8 @@ class NormFn3d:
         """
         n_eta = data.shape[4]
         nT    = data.shape[5]
-        eta = (np.arange(n_eta) * deta  + eta_min).reshape(1, 1, 1, n_eta, 1)
-        tau = (np.arange(nT)    * dtau  + tau_min).reshape(1, 1, 1, 1,    nT)
+        eta = (np.arange(n_eta) * deta  + eta_min).astype(data.dtype, copy=False).reshape(1, 1, 1, n_eta, 1)
+        tau = (np.arange(nT)    * dtau  + tau_min).astype(data.dtype, copy=False).reshape(1, 1, 1, 1,    nT)
 
         out = data.copy()
         base = np.clip(np.nan_to_num(data[:, 0] / (tau + eps), nan=0.0), 0.0, None)
@@ -444,7 +450,7 @@ class NormFn3d:
         shape_ref : (n_eta, n_tau) ∈ (0, 1] — save alongside the model for inversion
         """
         nT  = data.shape[-1]
-        tau = (np.arange(nT) * dtau + tau_min).reshape(1, 1, 1, 1, nT)
+        tau = (np.arange(nT) * dtau + tau_min).astype(data.dtype, copy=False).reshape(1, 1, 1, 1, nT)
 
         out = data.copy()
         out[:, 0] = data[:, 0] ** 0.75 * tau
@@ -482,7 +488,7 @@ class NormFn3d:
         out : same shape as *data* with physical energy density restored.
         """
         nT  = data.shape[-1]
-        tau = (np.arange(nT) * dtau + tau_min).reshape(1, 1, 1, 1, nT)
+        tau = (np.arange(nT) * dtau + tau_min).astype(data.dtype, copy=False).reshape(1, 1, 1, 1, nT)
 
         out = data.copy()
         ed_rescaled = data[:, 0] * shape_ref[np.newaxis, np.newaxis, np.newaxis, :, :]

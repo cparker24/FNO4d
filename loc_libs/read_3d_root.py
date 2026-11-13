@@ -7,7 +7,7 @@ import numpy as np
 def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
                  storage_options=None, verbose=False,
                  xyslice=None, etaslice=None, tauslice=None,
-                 min_ntau_freezeout=None, drop_channels=None):
+                 min_ntau_freezeout=None, drop_channels=None, dtype=np.float32):
     ''' read events from a 3d root file; file_path may be a single path or a list of paths
     returns:
       {'data' : 6D numpy array,
@@ -37,6 +37,14 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
         every feature channel, unchanged behavior for any existing caller
         that doesn't pass this. Only supported on the variable-length-tau
         ("straight from .root") path below, not the legacy flat_data path.
+    dtype : storage dtype for the master output array (default np.float32,
+        unchanged behavior for any existing caller). Pass np.float16 to halve
+        the resident size of a dataset large enough to be host-RAM-bound --
+        every downstream consumer already upcasts back to float32 per-batch
+        before it reaches the model (FluidDataset._to_tensor does
+        torch.FloatTensor(arr); collate.py's np.ascontiguousarray(..., dtype=
+        np.float32) does the same for the lazy path), so this only affects
+        the precision of the long-lived host array, not what the model sees.
     '''
 
     if verbose:
@@ -243,7 +251,7 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
         # Allocate the output array ONCE, up front -- already at its final
         # CROPPED/FILTERED shape (see above), not the full raw resolution.
         arr = np.zeros(
-            (nevents_out, ntau_out, nx_out, ny_out, neta_out, nFeatures_out), dtype=np.float32
+            (nevents_out, ntau_out, nx_out, ny_out, neta_out, nFeatures_out), dtype=dtype
         )
 
         if verbose:
@@ -276,7 +284,7 @@ def read_3d_data(file_path, nevents=-1, choose_ntau=None, local_rank=None,
             padded = ak.to_numpy(
                 ak.fill_none(ak.pad_none(arr_ak, target_len, axis=-1, clip=True),
                             np.float32(0.))
-            ).astype(np.float32, copy=False)
+            ).astype(dtype, copy=False)
             padded = padded.reshape(
                 n_chunk, choose_ntau, dat['nx'], dat['ny'], dat['neta'], dat['nFeatures']
             )
