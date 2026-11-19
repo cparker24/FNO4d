@@ -94,25 +94,33 @@ class FixedInputModel(torch.nn.Module):
         return self.fno_model(self.fixed_input)
 
 
-def build_fixed_input(root_file, event, ntau_fno, tau0, dtau, nx=64, ny=64, neta=64):
+def build_fixed_input(root_file, event, ntau_fno, tau0, dtau, nx=64, ny=64, neta=64,
+                       drop_channels=None, crop_edge_bin=True):
+    # crop_edge_bin=True reproduces the legacy nx/ny/neta=2*N+1 grid's
+    # training-time [:-1] crop (the old asymmetric-grid convention). The
+    # newer symmetric-grid ROOT files (RootBulkWriter.cc commit da3ea4cc,
+    # filenames ending _symgrid) are already exactly (nx, ny, neta) wide
+    # with no edge bin -- pass crop_edge_bin=False for those, or this
+    # function's shape assertion below will fail immediately.
+    xyslice = slice(None, -1) if crop_edge_bin else None
+    etaslice = slice(None, -1) if crop_edge_bin else None
     arr_data = read_3d_data(
         root_file, nevents=event + 1, choose_ntau=1,
-        xyslice=slice(None, -1), etaslice=slice(None, -1), tauslice=slice(None, 1),
-        min_ntau_freezeout=None,
+        xyslice=xyslice, etaslice=etaslice, tauslice=slice(None, 1),
+        min_ntau_freezeout=None, drop_channels=drop_channels,
     )
-    arr = arr_data["arr"]  # (nevents, nFeatures=5, nx, ny, neta, ntau=1)
+    arr = arr_data["arr"]  # (nevents, nFeatures, nx, ny, neta, ntau=1)
     assert arr.shape[2:5] == (nx, ny, neta), f"unexpected spatial shape {arr.shape}"
     assert abs(arr_data["tau_min"] - tau0) < 1e-3, (
         f"--tau0 {tau0} doesn't match this ROOT file's tau_min {arr_data['tau_min']}."
     )
 
-    ic = arr[event, :, :, :, :, 0].copy()  # (5, nx, ny, neta) -- raw tau index 0, the IC
+    ic = arr[event, :, :, :, :, 0].copy()  # (nFeatures, nx, ny, neta) -- raw tau index 0, the IC
     ed = np.clip(ic[0], 0.0, None)
     ic[0] = ed ** 0.75 * tau0  # NormalizeEnergyDensity(ed, tau0), channel 0 only
 
     print(f"Fixed IC built: event {event}, channel0 (normalized ed) range "
-          f"[{ic[0].min():.4g}, {ic[0].max():.4g}], channel1 (T) range "
-          f"[{ic[1].min():.4g}, {ic[1].max():.4g}]")
+          f"[{ic[0].min():.4g}, {ic[0].max():.4g}], nFeatures={ic.shape[0]}")
 
     ic_t = torch.from_numpy(ic).float()  # (5, nx, ny, neta)
     # Repeat across the tau axis, matching FnoHydro.cc's own
@@ -137,7 +145,13 @@ def main():
     p.add_argument("--device", default="cpu")
     p.add_argument("--atol", type=float, default=1e-5)
     p.add_argument("--output", required=True)
+    p.add_argument("--drop-channels", default=None,
+                   help="comma-separated feature indices to drop before building the model "
+                        "(e.g. '1' for temperature, matching a notemp training config's drop_channels: [1])")
+    p.add_argument("--no-crop-edge-bin", action="store_true",
+                   help="pass for symgrid ROOT files (already exactly nx/ny/neta wide, no edge bin to crop)")
     args = p.parse_args()
+    drop_channels = [int(x) for x in args.drop_channels.split(",")] if args.drop_channels else None
 
     device = torch.device(args.device)
     cfg = yaml.safe_load(Path(args.fno_config).read_text())
@@ -150,6 +164,7 @@ def main():
     fixed_input = build_fixed_input(
         args.root_file, args.event, args.ntau_fno, args.tau0, args.dtau,
         nx=args.nx, ny=args.ny, neta=args.neta,
+        drop_channels=drop_channels, crop_edge_bin=not args.no_crop_edge_bin,
     ).to(device)
 
     wrapper = FixedInputModel(fno_model, fixed_input)

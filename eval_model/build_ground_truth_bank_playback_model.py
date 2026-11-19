@@ -65,7 +65,13 @@ def main():
     p.add_argument("--ny", type=int, default=64)
     p.add_argument("--neta", type=int, default=64)
     p.add_argument("--output", required=True)
+    p.add_argument("--drop-channels", default=None,
+                    help="comma-separated feature indices to drop before building the bank "
+                         "(e.g. '1' for temperature, matching a notemp training config's drop_channels: [1])")
+    p.add_argument("--no-crop-edge-bin", action="store_true",
+                    help="pass for symgrid ROOT files (already exactly nx/ny/neta wide, no edge bin to crop)")
     args = p.parse_args()
+    drop_channels = [int(x) for x in args.drop_channels.split(",")] if args.drop_channels else None
 
     tensors = []
     for i in range(args.n_events):
@@ -73,7 +79,8 @@ def main():
         t = build_ground_truth_tensor(
             args.root_file, ev, args.ntau_fno, args.tau0, args.dtau,
             nx=args.nx, ny=args.ny, neta=args.neta,
-        )  # (1, 5, nx, ny, neta, ntau_fno)
+            drop_channels=drop_channels, crop_edge_bin=not args.no_crop_edge_bin,
+        )  # (1, channels, nx, ny, neta, ntau_fno)
         tensors.append(t.squeeze(0))
     bank = torch.stack(tensors, dim=0)  # (N, 5, nx, ny, neta, ntau_fno)
     print(f"Bank built: {bank.shape[0]} events, shape {tuple(bank.shape)}")

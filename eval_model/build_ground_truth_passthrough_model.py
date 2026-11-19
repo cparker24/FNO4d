@@ -74,7 +74,15 @@ class ConstantOutput(torch.nn.Module):
 
 
 def build_ground_truth_tensor(root_file, event, ntau_fno, tau0, dtau,
-                               nx=64, ny=64, neta=64):
+                               nx=64, ny=64, neta=64, drop_channels=None,
+                               crop_edge_bin=True):
+    # crop_edge_bin=True reproduces the legacy nx/ny/neta=2*N+1 grid's
+    # training-time [:-1] crop (the old asymmetric-grid convention). The
+    # newer symmetric-grid ROOT files (RootBulkWriter.cc commit da3ea4cc,
+    # filenames ending _symgrid) are already exactly (nx, ny, neta) wide
+    # with no edge bin -- pass crop_edge_bin=False for those.
+    xyslice = slice(None, -1) if crop_edge_bin else None
+    etaslice = slice(None, -1) if crop_edge_bin else None
     # choose_ntau must cover raw tau index ntau_fno (= output slot
     # ntau_fno-1's raw index j+1 = ntau_fno), so request ntau_fno+1 raw
     # steps; read_3d_data zero-pads past this event's own ntau_freezeout,
@@ -82,10 +90,11 @@ def build_ground_truth_tensor(root_file, event, ntau_fno, tau0, dtau,
     choose_ntau = ntau_fno + 1
     arr_data = read_3d_data(
         root_file, nevents=event + 1, choose_ntau=choose_ntau,
-        xyslice=slice(None, -1), etaslice=slice(None, -1),
+        xyslice=xyslice, etaslice=etaslice,
         tauslice=slice(None, choose_ntau), min_ntau_freezeout=None,
+        drop_channels=drop_channels,
     )
-    arr = arr_data["arr"]  # (nevents, nFeatures=5, nx, ny, neta, ntau)
+    arr = arr_data["arr"]  # (nevents, nFeatures, nx, ny, neta, ntau)
     assert arr.shape[2:5] == (nx, ny, neta), f"unexpected spatial shape {arr.shape}"
     assert abs(arr_data["tau_min"] - tau0) < 1e-3, (
         f"--tau0 {tau0} doesn't match this ROOT file's tau_min "
@@ -107,9 +116,8 @@ def build_ground_truth_tensor(root_file, event, ntau_fno, tau0, dtau,
     print(f"Ground-truth tensor built: event {event}, ntau_freezeout="
           f"{arr_data['ntau_freezeout'][event]}, shape {out.shape}")
     print(f"  channel0 (normalized ed) range: [{out[0].min():.4g}, {out[0].max():.4g}]")
-    print(f"  channel1 (T) range: [{out[1].min():.4g}, {out[1].max():.4g}]")
 
-    return torch.from_numpy(out).float().unsqueeze(0)  # (1, 5, nx, ny, neta, ntau_fno)
+    return torch.from_numpy(out).float().unsqueeze(0)  # (1, nFeatures, nx, ny, neta, ntau_fno)
 
 
 def main():
@@ -124,16 +132,28 @@ def main():
     p.add_argument("--ny", type=int, default=64)
     p.add_argument("--neta", type=int, default=64)
     p.add_argument("--output", required=True)
+    p.add_argument("--channels", type=int, default=5)
+    p.add_argument("--drop-channels", default=None,
+                   help="comma-separated feature indices to drop (e.g. '1' for temperature, "
+                        "matching a notemp training config's drop_channels: [1])")
+    p.add_argument("--no-crop-edge-bin", action="store_true",
+                   help="pass for symgrid ROOT files (already exactly nx/ny/neta wide, no edge bin to crop)")
     args = p.parse_args()
+    drop_channels = [int(x) for x in args.drop_channels.split(",")] if args.drop_channels else None
 
     out_tensor = build_ground_truth_tensor(
         args.root_file, args.event, args.ntau_fno, args.tau0, args.dtau,
         nx=args.nx, ny=args.ny, neta=args.neta,
+        drop_channels=drop_channels, crop_edge_bin=not args.no_crop_edge_bin,
+    )
+    assert out_tensor.shape[1] == args.channels, (
+        f"--channels {args.channels} doesn't match the tensor built after drop_channels "
+        f"({out_tensor.shape[1]} channels) -- fix --channels or --drop-channels."
     )
 
     model = ConstantOutput(out_tensor)
     model.eval()
-    example = torch.randn(1, 5, args.nx, args.ny, args.neta, args.ntau_fno)
+    example = torch.randn(1, args.channels, args.nx, args.ny, args.neta, args.ntau_fno)
     with torch.no_grad():
         eager_out = model(example)
         traced = torch.jit.trace(model, example)
@@ -154,7 +174,7 @@ def main():
     print(f"Saved ground-truth passthrough module -> {out_path}")
     print(
         "\nXML <FNO> block should use:\n"
-        f"  <n_features>5</n_features>\n"
+        f"  <n_features>{args.channels}</n_features>\n"
         f"  <nx>{args.nx}</nx>\n"
         f"  <ny>{args.ny}</ny>\n"
         f"  <neta>{args.neta}</neta>\n"
