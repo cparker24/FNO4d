@@ -1,0 +1,123 @@
+# ---------------------------------------------------------------------------
+# FNO training config — pure PyTorch — Lambda Cloud (1x A100/H100 80GB)
+#
+# Centrality-specialist ablation: trains EXCLUSIVELY on 20-30% centrality,
+# with that centrality's own training data DOUBLED again (100 -> 200
+# events) rather than spread across all 4 centralities. Same architecture/
+# recipe/grid/normalization as the production checkpoint
+# (config_lambda_symgrid_eta4_n65_notemp_extended_90split_etamodes32.yaml,
+# the config actually used -- under an overridden model_dir/gcs_output_prefix
+# -- to train checkpoints_lambda_symgrid_doubled) -- see that config's
+# header for the symmetric-grid/data-doubling rationale, unchanged here.
+# The two variables changed are: (1) only 20-30% centrality is in
+# input_files/validation_files at all, and (2) that centrality now has 4
+# independently-generated 50-event batches (200 total) instead of 2 (100).
+#
+# Why: the production model is a generalist trained jointly across all 4
+# centralities with 100 events/centrality. This asks whether a model that
+# only ever has to learn ONE centrality's physics, with 2x the data for
+# that centrality specifically, does better on 20-30% than the
+# generalist does -- i.e. is the generalist's residual mid-rapidity
+# excess (ratio 1.0256 at 20-30%, see CURRENT_MODEL_STATUS.md section 3)
+# a capacity/cross-centrality-interference problem, or does it persist
+# even with a dedicated specialist and double the data for that one bin.
+#
+# New training data: xmls/AuAu_50ev_{v3,v4}_20_30_eta4_n65_symgrid.xml,
+# clones of the existing AuAu_50ev_v2_20_30_eta4_n65_symgrid.xml with only
+# RootBulkWriter's out_file_name changed (seed stays 0 -- JETSCAPE's
+# randomize-from-clock convention, so re-running draws a genuinely new,
+# independent batch each time, same as how v2 was produced from v1).
+# Generated via the same runJetscape binary/pipeline as every other
+# training-data file in this project (NOT the FNO live-inference path --
+# this is real MCGlauber+MUSIC physics, no model involved).
+#
+# This model is NOT comparable centrality-for-centrality against the
+# generalist outside 20-30% -- it has never seen 0-10/10-20/30-40% data
+# at all and should not be evaluated there.
+#
+# Usage:
+#   python train_torch.py --config config_lambda_symgrid_2030only_doubled200.yaml
+#
+# Run via setup_and_train_lambda.sh (same script, no changes needed --
+# TRAIN_CONFIG is already parameterized):
+#   TRAIN_CONFIG=config_lambda_symgrid_2030only_doubled200.yaml bash setup_and_train_lambda.sh
+# ---------------------------------------------------------------------------
+
+# --- mode selection ---
+data_source: gcs_download   # downloads input_files to local_data_dir, then trains locally
+
+# --- output ---
+odir:      ./out_lambda_symgrid_2030only_doubled200
+model_dir: ./checkpoints_lambda_symgrid_2030only_doubled200
+
+# --- input data ---
+# 20-30% centrality ONLY, now 4 independently-generated 50-event batches
+# (200 events total) instead of the generalist's 2 (100) -- see header.
+input_files:
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_20_30_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_v2_20_30_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_v3_20_30_eta4_n65_symgrid.root
+  - gs://test_fno/training_data/eta4_n65_symgrid/AuAu_50ev_v4_20_30_eta4_n65_symgrid.root
+
+# Dedicated validation set (20 events/centrality, seed 802701) -- ONLY the
+# 20-30% file, since this model never trains on any other centrality.
+# train_ratio below is ignored while this is set; ALL of input_files trains.
+validation_files:
+  - gs://test_fno/validation_data/eta4_n65_symgrid/AuAu_valid20ev_20_30_eta4_n65_symgrid.root
+
+nevents_in: -1            # events to load (-1 = all), applies to both input_files and validation_files
+
+# --- GCS authentication [gcs] ---
+# setup_and_train_lambda.sh copies this in from wherever you staged it on the
+# instance (see that script's header) -- it is NOT committed to git.
+gcs_key_file: ./fnotest-wayne-gcs.json
+
+# --- GCS download cache [download] ---
+local_data_dir:    ../data  # downloaded ROOT files are cached here
+overwrite_cache:   false    # true = re-download even if size matches
+gcs_show_progress: null     # null=auto  true=always  false=never
+
+# --- post-training GCS upload [gcs] ---
+# Distinct run name -- this ablation must never overwrite the production
+# checkpoint's or any other ablation's GCS run output.
+gcs_output_prefix: gs://test_fno/runs/symgrid_2030only_doubled200
+
+# --- normalisation ---
+normalization:
+  name: etau75_3d              # tau-only scaling of channel 0; unaffected by drop_channels below
+  alpha: 1.0
+
+# IDENTICAL rationale to the production config -- see its header. The
+# host-RAM saving matters less here (1 centrality's worth of files rather
+# than 4x2), but there is no reason to diverge from the validated setting.
+storage_dtype: float16
+
+# --- data preparation --- (all identical to the production config)
+train_ratio: 0.9           # ignored -- validation_files is set above, so ALL of input_files trains
+drop_channels: [1]         # drop temperature (index 1 of [rho, T, vx, vy, vz])
+xyslice:  null
+etaslice: null
+tauslice: [null, 120]
+min_ntau_freezeout: 10
+
+# --- model --- (identical architecture to the production config)
+hidden_channels: 16
+n_modes: [32, 32, 32, 16] # Fourier modes [x, y, eta, tau]
+
+# --- training ---
+n_epochs: 50               # same per-centrality epoch budget as the generalist -- see header for why
+batch_size: 1
+checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
+min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
+save_last: true           # save final epoch state to model_dir/last_model.*
+eval_interval: 2          # run evaluation every N epochs
+test_batch_sizes: [2]     # eval batch size per test resolution
+
+# --- optimizer ---
+# CosineAnnealingLR's T_max tracks n_epochs (=50 here) -- single smooth
+# decay, same as the production recipe (no warm restarts in this ablation).
+lr: 8.0e-3
+weight_decay: 1.0e-4
+
+# --- logging ---
+log_directly: true        # mirror output to training.log
