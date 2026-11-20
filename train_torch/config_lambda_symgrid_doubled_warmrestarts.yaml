@@ -23,13 +23,19 @@
 # to repeat on this lineage -- this run gets a clean data point rather than
 # assuming the old result transfers.
 #
-# Budget choice: T_0=25, T_mult=1, n_epochs=50 (NOT 100) -- this gives
-# exactly 2 complete restart cycles (matching the per-cycle length of the
-# original test) within the SAME total epoch budget as the current
-# production recipe, rather than doubling training cost/wall-clock to
-# chase cycles 3-4, which the prior test already showed only get worse.
-# If cycle 2 here also degrades relative to cycle 1 the way it did before,
-# that alone is enough to answer the question without paying for 4 cycles.
+# Budget (updated): the first attempt at T_0=25/n_epochs=50 (2 short
+# cycles) gave no improvement over the single-cosine production
+# checkpoint (matched-IC dN/dy ratio 1.0307 vs. 1.0149, plus a new
+# forward-rapidity asymmetry -- see CURRENT_MODEL_STATUS.md section 5)
+# and never reached a comfortable plateau: eval 64_l2 only barely beat
+# its own pre-restart best right at the final epoch (see
+# checkpoints_lambda_symgrid_doubled_warmrestarts/training_progress.png).
+# This run gives each cycle the FULL production epoch budget instead of
+# half of it -- T_0=50, T_mult=1, n_epochs=150 -- so each of the 3 cycles
+# gets as long to anneal as the production recipe's single decay did,
+# rather than cutting every cycle short. Output paths below were renamed
+# (_3x50 suffix) specifically so this doesn't overwrite the already-
+# analyzed 2x25 run's checkpoint/GCS output.
 #
 # Usage:
 #   python train_torch.py --config config_lambda_symgrid_doubled_warmrestarts.yaml
@@ -43,8 +49,8 @@
 data_source: gcs_download   # downloads input_files to local_data_dir, then trains locally
 
 # --- output ---
-odir:      ./out_lambda_symgrid_doubled_warmrestarts
-model_dir: ./checkpoints_lambda_symgrid_doubled_warmrestarts
+odir:      ./out_lambda_symgrid_doubled_warmrestarts_3x50
+model_dir: ./checkpoints_lambda_symgrid_doubled_warmrestarts_3x50
 
 # --- input data ---
 # IDENTICAL to config_lambda_symgrid_eta4_n65_notemp_extended_90split_
@@ -81,8 +87,9 @@ gcs_show_progress: null     # null=auto  true=always  false=never
 
 # --- post-training GCS upload [gcs] ---
 # Distinct run name -- this ablation must never overwrite the production
-# checkpoint's own GCS run output.
-gcs_output_prefix: gs://test_fno/runs/symgrid_doubled_warmrestarts
+# checkpoint's own GCS run output, nor the already-analyzed 2x25-cycle
+# warm-restart run's output (gs://test_fno/runs/symgrid_doubled_warmrestarts).
+gcs_output_prefix: gs://test_fno/runs/symgrid_doubled_warmrestarts_3x50
 
 # --- normalisation ---
 normalization:
@@ -105,7 +112,7 @@ hidden_channels: 16
 n_modes: [32, 32, 32, 16] # Fourier modes [x, y, eta, tau]
 
 # --- training ---
-n_epochs: 50               # same total budget as the production recipe -- see header for why
+n_epochs: 200               # 4 full cycles of 50 epochs each -- see header for why
 batch_size: 1
 checkpoint_freq: null     # save checkpoint every N epochs; null = disabled
 min_save_epoch:  null     # skip best/checkpoint saves before this epoch; null = save from epoch 0
@@ -118,15 +125,16 @@ lr: 8.0e-3
 weight_decay: 1.0e-4
 
 # THE ONE CHANGE vs. the production config: periodic LR resets instead of
-# a single smooth decay. T_0=25/T_mult=1 over n_epochs=50 gives exactly 2
-# complete cycles -- see header for why this budget was chosen over
-# mirroring the old test's 4-cycle/100-epoch schedule. "best" checkpoint
-# logic (train_torch.py) saves on eval score regardless of cycle position,
-# so a mid-cycle disruption won't overwrite a better pre-restart checkpoint.
+# a single smooth decay. T_0=50/T_mult=1 over n_epochs=150 gives exactly 3
+# complete cycles, each as long as the production recipe's single decay --
+# see header for why this is a bigger budget than the first 2x25 attempt.
+# "best" checkpoint logic (train_torch.py) saves on eval score regardless
+# of cycle position, so a mid-cycle disruption won't overwrite a better
+# pre-restart checkpoint.
 scheduler:
   name: cosine_warm_restarts
-  T_0: 25       # epochs in the first cycle
-  T_mult: 1     # the second cycle is the same length (2 cycles in 50 epochs)
+  T_0: 50       # epochs in the first cycle
+  T_mult: 1     # every cycle is the same length (3 cycles in 150 epochs)
 
 # --- logging ---
 log_directly: true        # mirror output to training.log
